@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend (ASP.NET)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-backend",
+      "program": "${workspaceFolder}/backend/Greyvetro.API/bin/Debug/net10.0/Greyvetro.API.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/backend/Greyvetro.API",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    {
+      "name": "Frontend (Flutter macOS)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/frontend/lib/main.dart",
+      "flutterSdkPath": "/Users/MarkP/flutter",
+      "args": ["-d", "macos"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack",
+      "configurations": ["Backend (ASP.NET)", "Frontend (Flutter macOS)"],
+      "stopAll": true
+    }
+  ]
+}

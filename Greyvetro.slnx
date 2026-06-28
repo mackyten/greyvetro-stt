@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/Greyvetro.API/Greyvetro.API.csproj" />
+    <Project Path="backend/Greyvetro.Application/Greyvetro.Application.csproj" />
+    <Project Path="backend/Greyvetro.Domain/Greyvetro.Domain.csproj" />
+    <Project Path="backend/Greyvetro.Infrastructure/Greyvetro.Infrastructure.csproj" />
+  </Folder>
+</Solution>

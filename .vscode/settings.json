@@ -1,0 +1,6 @@
+{
+  "dart.flutterSdkPath": "/Users/MarkP/flutter",
+  "terminal.integrated.env.osx": {
+    "PATH": "/usr/local/dotnet:/usr/local/dotnet/tools:/Users/MarkP/flutter/bin:${env:PATH}"
+  }
+}

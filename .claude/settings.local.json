@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//usr/local/share/dotnet/**)",
+      "Read(//usr/local/bin/**)",
+      "Read(//Users/MarkP/Developer/greyvetro-conversational-agent/**)"
+    ]
+  }
+}
