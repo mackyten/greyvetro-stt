@@ -86,14 +86,14 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
 
 ## Roadmap
 
-1. ✅ **Free voices only** — `GetVoicesAsync` returns premade (free) + cloned; picker has search + gender filter (`voices_screen.dart`, `voice_model.dart` parses labels).
-2. ✅ **Use my own voice** — `CreateVoiceScreen` (opened via "Create my voice" in the picker): record (package `record`) or upload (`file_picker`) samples → `POST /voices/clone` (multipart) → returned voice is selected and shows under "My Voices". Warns if `usage.canCloneVoices` is false. macOS mic + user-selected-file entitlements added; `NSMicrophoneUsageDescription` set. Requires a paid ElevenLabs plan to actually clone.
+1. ✅ **Free voices only** — `GetVoicesAsync` returns premade (free) + cloned; picker has search + gender filter, plus manual refresh (refresh button, pull-to-refresh, and retry-on-error) to re-fetch the list, e.g. after upgrading a plan or cloning a voice (`voices_screen.dart`, `voice_model.dart` parses labels).
+2. ✅ **Use my own voice** — `CreateVoiceScreen` (opened via "Create my voice" in the picker): record (package `record`) or upload (`file_picker`) samples → `POST /voices/clone` (multipart) → returned voice is selected and shows under "My Voices". Warns if `usage.canCloneVoices` is false. macOS mic + user-selected-file entitlements added; `NSMicrophoneUsageDescription` set. Requires a paid ElevenLabs plan to actually clone. Note: the upload picker uses `FileType.custom` with an explicit `allowedExtensions` list (`m4a, mp3, wav, …`) — `FileType.audio` greys out `.m4a` on macOS (the format the in-app recorder produces).
 3. ✅ **Credit tracking** — backend `GET /usage` (subscription endpoint); `UsageBadge` in the composer header (remaining credits + bar, refreshes after each generation).
 4. ✅ **Modern brand UI** — `core/theme.dart` palette (grey / baby blue / baby pink); all screens restyled.
 5. ✅ **Local gallery** — `GalleryRepository` persists audio + metadata under app documents dir; `GalleryScreen` (Gallery tab) replays, shows text, edit & regenerate, export, delete. Shared `AudioPlayer` (`core/audio_player.dart`). Navigation via `HomeShell`.
 
 ### Candidate additions
-- ✅ **Stability / similarity sliders** — "Voice settings" card in the composer; values flow into generation, are stored per gallery item, and restored on edit/regenerate. (Model selection still hardcoded to `eleven_multilingual_v2`.)
+- ✅ **Voice settings** — "Voice settings" card in the composer: **Stability**, **Similarity**, **Style** sliders + a **Speaker boost** toggle (on by default — strongest lever for cloned-voice likeness). All four flow through `TtsRequest` → `VoiceSettings`, are stored per gallery item, and restored on edit/regenerate. (Model selection still hardcoded to `eleven_multilingual_v2`.)
 - **Voice preview** playback before selecting.
 - **Favorites** for voices.
 - **Quota-exceeded** friendly error handling.

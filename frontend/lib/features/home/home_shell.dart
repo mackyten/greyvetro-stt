@@ -47,6 +47,8 @@ class _HomeShellState extends State<HomeShell> {
       voice,
       stability: item.stability,
       similarity: item.similarityBoost,
+      style: item.style,
+      speakerBoost: item.useSpeakerBoost,
     );
     setState(() => _index = 0);
   }

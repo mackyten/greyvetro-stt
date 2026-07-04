@@ -46,7 +46,7 @@ public class ElevenLabsService(ElevenLabsClient client, ILogger<ElevenLabsServic
     public async Task<Stream> GenerateSpeechAsync(Domain.Entities.TtsRequest request, CancellationToken ct = default)
     {
         var voice = new Voice(request.VoiceId, string.Empty);
-        var voiceSettings = new VoiceSettings(request.Stability, request.SimilarityBoost, 0f, false, 1f);
+        var voiceSettings = new VoiceSettings(request.Stability, request.SimilarityBoost, request.Style, request.UseSpeakerBoost, 1f);
         var model = new Model(request.ModelId);
         var ttsRequest = new TextToSpeechRequest(
             voice, request.Text, System.Text.Encoding.UTF8, voiceSettings,

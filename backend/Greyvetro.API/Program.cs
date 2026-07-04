@@ -43,7 +43,7 @@ app.MapPost("/tts", async (GenerateSpeechRequest req, GenerateSpeechHandler hand
 {
     try
     {
-        var audio = await handler.HandleAsync(new GenerateSpeechCommand(req.Text, req.VoiceId, req.Stability, req.SimilarityBoost), ct);
+        var audio = await handler.HandleAsync(new GenerateSpeechCommand(req.Text, req.VoiceId, req.Stability, req.SimilarityBoost, req.Style, req.UseSpeakerBoost), ct);
         return Results.Stream(audio, "audio/mpeg");
     }
     catch (HttpRequestException ex)
@@ -68,4 +68,4 @@ app.MapPost("/voices/clone", async (HttpRequest http, CloneVoiceHandler handler,
 
 app.Run();
 
-record GenerateSpeechRequest(string Text, string VoiceId, float Stability = 0.5f, float SimilarityBoost = 0.75f);
+record GenerateSpeechRequest(string Text, string VoiceId, float Stability = 0.5f, float SimilarityBoost = 0.75f, float Style = 0f, bool UseSpeakerBoost = false);

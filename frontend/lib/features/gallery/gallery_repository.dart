@@ -56,6 +56,8 @@ class GalleryRepository {
     required String voiceName,
     required double stability,
     required double similarityBoost,
+    double style = 0.0,
+    bool useSpeakerBoost = false,
   }) async {
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     final fileName = 'gv_$id.mp3';
@@ -70,6 +72,8 @@ class GalleryRepository {
       voiceName: voiceName,
       stability: stability,
       similarityBoost: similarityBoost,
+      style: style,
+      useSpeakerBoost: useSpeakerBoost,
       createdAt: DateTime.now(),
     );
 

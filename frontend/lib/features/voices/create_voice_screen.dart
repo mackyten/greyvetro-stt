@@ -89,8 +89,14 @@ class _CreateVoiceScreenState extends State<CreateVoiceScreen> {
   }
 
   Future<void> _upload() async {
+    // FileType.audio greys out m4a on macOS, so filter by explicit
+    // extensions instead — these are the formats ElevenLabs accepts for
+    // voice cloning (m4a is what the in-app recorder produces).
     final result = await FilePicker.pickFiles(
-      type: FileType.audio,
+      type: FileType.custom,
+      allowedExtensions: const [
+        'm4a', 'mp3', 'wav', 'flac', 'aac', 'ogg', 'aiff', 'mp4', 'webm',
+      ],
       allowMultiple: true,
     );
     if (result == null) return;

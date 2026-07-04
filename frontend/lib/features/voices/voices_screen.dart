@@ -44,6 +44,15 @@ class _VoicesScreenState extends State<VoicesScreen> {
     super.dispose();
   }
 
+  /// Re-fetch the voice list from the backend (e.g. after upgrading a plan
+  /// or cloning a new voice). Awaits the new future so callers like
+  /// [RefreshIndicator] can keep the spinner up until it resolves.
+  Future<void> _reload() async {
+    final future = widget.apiClient.getVoices();
+    setState(() => _voices = future);
+    await future;
+  }
+
   bool _matches(VoiceModel v) {
     if (_genderFilter != null &&
         (v.gender?.toLowerCase() != _genderFilter!.toLowerCase())) {
@@ -67,10 +76,21 @@ class _VoicesScreenState extends State<VoicesScreen> {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text(
-                'Could not load voices.\n${snapshot.error}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.slate),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Could not load voices.\n${snapshot.error}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.slate),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: _reload,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Retry'),
+                  ),
+                ],
               ),
             ),
           );
@@ -93,28 +113,41 @@ class _VoicesScreenState extends State<VoicesScreen> {
             _searchBar(),
             if (genders.isNotEmpty) _genderChips(genders),
             Expanded(
-              child: filtered.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No voices match your search.',
-                        style: TextStyle(color: AppColors.slate),
+              child: RefreshIndicator(
+                onRefresh: _reload,
+                color: AppColors.babyBlueDeep,
+                child: filtered.isEmpty
+                    ? ListView(
+                        // AlwaysScrollable so pull-to-refresh still works
+                        // even when no voices match the current search.
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: const [
+                          SizedBox(height: 120),
+                          Center(
+                            child: Text(
+                              'No voices match your search.',
+                              style: TextStyle(color: AppColors.slate),
+                            ),
+                          ),
+                        ],
+                      )
+                    : ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                        children: [
+                          _createVoiceButton(),
+                          if (custom.isNotEmpty) ...[
+                            _sectionHeader('My Voices'),
+                            ...custom.map(_tile),
+                            const SizedBox(height: 8),
+                          ],
+                          if (builtIn.isNotEmpty) ...[
+                            _sectionHeader('Free Voices'),
+                            ...builtIn.map(_tile),
+                          ],
+                        ],
                       ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-                      children: [
-                        _createVoiceButton(),
-                        if (custom.isNotEmpty) ...[
-                          _sectionHeader('My Voices'),
-                          ...custom.map(_tile),
-                          const SizedBox(height: 8),
-                        ],
-                        if (builtIn.isNotEmpty) ...[
-                          _sectionHeader('Free Voices'),
-                          ...builtIn.map(_tile),
-                        ],
-                      ],
-                    ),
+              ),
             ),
           ],
         );
@@ -124,18 +157,31 @@ class _VoicesScreenState extends State<VoicesScreen> {
 
   Widget _searchBar() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-        child: TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Search voices…',
-            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.slate),
-            suffixIcon: _query.isEmpty
-                ? null
-                : IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                    onPressed: () => _searchController.clear(),
-                  ),
-          ),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search voices…',
+                  prefixIcon:
+                      const Icon(Icons.search_rounded, color: AppColors.slate),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => _searchController.clear(),
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, color: AppColors.slate),
+              tooltip: 'Refresh voices',
+              onPressed: _reload,
+            ),
+          ],
         ),
       );
 
@@ -185,7 +231,7 @@ class _VoicesScreenState extends State<VoicesScreen> {
     );
     if (voice == null) return;
     // Refresh the list so the new voice shows under "My Voices", then select it.
-    setState(() => _voices = widget.apiClient.getVoices());
+    _reload();
     widget.onVoiceSelected(voice);
   }
 

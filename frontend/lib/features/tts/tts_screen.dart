@@ -43,6 +43,10 @@ class TtsScreenState extends State<TtsScreen> {
 
   double _stability = 0.5;
   double _similarity = 0.75;
+  double _style = 0.0;
+  // On by default: this is the strongest lever for making a cloned voice
+  // resemble the original speaker.
+  bool _speakerBoost = true;
   bool _showAdvanced = false;
 
   @override
@@ -63,12 +67,16 @@ class TtsScreenState extends State<TtsScreen> {
     VoiceModel voice, {
     double? stability,
     double? similarity,
+    double? style,
+    bool? speakerBoost,
   }) {
     setState(() {
       _textController.text = text;
       _selectedVoice = voice;
       if (stability != null) _stability = stability;
       if (similarity != null) _similarity = similarity;
+      if (style != null) _style = style;
+      if (speakerBoost != null) _speakerBoost = speakerBoost;
       _audioBytes = null;
       _tempAudioPath = null;
       _saved = false;
@@ -92,6 +100,8 @@ class TtsScreenState extends State<TtsScreen> {
         voiceId: _selectedVoice!.id,
         stability: _stability,
         similarityBoost: _similarity,
+        style: _style,
+        useSpeakerBoost: _speakerBoost,
       );
       final tmp = await getTemporaryDirectory();
       if (!await tmp.exists()) await tmp.create(recursive: true);
@@ -124,6 +134,8 @@ class TtsScreenState extends State<TtsScreen> {
         voiceName: _selectedVoice!.name,
         stability: _stability,
         similarityBoost: _similarity,
+        style: _style,
+        useSpeakerBoost: _speakerBoost,
       );
       setState(() => _saved = true);
       widget.onSavedToGallery();
@@ -426,6 +438,29 @@ class TtsScreenState extends State<TtsScreen> {
                     hint: 'How closely to match the original voice',
                     value: _similarity,
                     onChanged: (v) => setState(() => _similarity = v),
+                  ),
+                  _slider(
+                    label: 'Style',
+                    hint: 'Higher = more expressive · 0 = most neutral & stable',
+                    value: _style,
+                    onChanged: (v) => setState(() => _style = v),
+                  ),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    activeThumbColor: AppColors.babyBlueDeep,
+                    value: _speakerBoost,
+                    onChanged: (v) => setState(() => _speakerBoost = v),
+                    title: const Text(
+                      'Speaker boost',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.deep,
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Boosts resemblance to your original voice',
+                      style: TextStyle(fontSize: 12, color: AppColors.slate),
+                    ),
                   ),
                 ],
               ),

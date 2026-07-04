@@ -26,6 +26,8 @@ class ApiClient {
     required String voiceId,
     double stability = 0.5,
     double similarityBoost = 0.75,
+    double style = 0.0,
+    bool useSpeakerBoost = false,
   }) async {
     final res = await _client.post(
       Uri.parse('$_base/tts'),
@@ -35,6 +37,8 @@ class ApiClient {
         'voiceId': voiceId,
         'stability': stability,
         'similarityBoost': similarityBoost,
+        'style': style,
+        'useSpeakerBoost': useSpeakerBoost,
       }),
     );
     _checkStatus(res);

@@ -6,6 +6,8 @@ class GalleryItem {
   final String voiceName;
   final double stability;
   final double similarityBoost;
+  final double style;
+  final bool useSpeakerBoost;
   final DateTime createdAt;
 
   const GalleryItem({
@@ -16,6 +18,8 @@ class GalleryItem {
     required this.voiceName,
     required this.stability,
     required this.similarityBoost,
+    this.style = 0.0,
+    this.useSpeakerBoost = false,
     required this.createdAt,
   });
 
@@ -27,6 +31,8 @@ class GalleryItem {
         'voiceName': voiceName,
         'stability': stability,
         'similarityBoost': similarityBoost,
+        'style': style,
+        'useSpeakerBoost': useSpeakerBoost,
         'createdAt': createdAt.toIso8601String(),
       };
 
@@ -38,6 +44,8 @@ class GalleryItem {
         voiceName: json['voiceName'] as String? ?? 'Unknown voice',
         stability: (json['stability'] as num?)?.toDouble() ?? 0.5,
         similarityBoost: (json['similarityBoost'] as num?)?.toDouble() ?? 0.75,
+        style: (json['style'] as num?)?.toDouble() ?? 0.0,
+        useSpeakerBoost: json['useSpeakerBoost'] as bool? ?? false,
         createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
             DateTime.now(),
       );
