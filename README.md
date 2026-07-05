@@ -1,0 +1,105 @@
+# Greyvetro TTS
+
+A text-to-speech desktop app built on ElevenLabs. **.NET 10 backend + Flutter
+desktop frontend** (macOS + Windows). Built for personal/company use with
+brand-aligned styling.
+
+The ElevenLabs API key lives **only** on the backend — the Flutter app never
+sees it and talks to the backend over `http://localhost:5050`.
+
+> For architecture, conventions, and roadmap, see [`CLAUDE.md`](./CLAUDE.md).
+
+---
+
+## Full-stack quickstart
+
+The app is two processes: a **backend** API and a **frontend** desktop app.
+Run each in its own terminal, backend first.
+
+### Prerequisites
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| .NET SDK | **10.0+** | `dotnet --version` |
+| Flutter | **3.44+** (Dart SDK ≥ 3.12) | `flutter --version` |
+| ElevenLabs API key | — | `sk_...` — [free tier](https://elevenlabs.io) works for premade voices |
+| Platform toolchain | Xcode (macOS) / Visual Studio with "Desktop development with C++" (Windows) | required to build the Flutter desktop shell |
+
+Run `flutter doctor` once to confirm your desktop toolchain is set up.
+
+### 1. Configure the backend key (one time)
+
+Create `backend/Greyvetro.API/appsettings.json` (git-ignored — never commit it):
+
+```json
+{
+  "ElevenLabs": { "ApiKey": "sk_..." },
+  "Urls": "http://localhost:5050"
+}
+```
+
+### 2. Terminal 1 — backend
+
+```bash
+cd backend
+dotnet run --project Greyvetro.API      # serves http://localhost:5050
+```
+
+Leave it running. Sanity check from another shell: `curl http://localhost:5050/voices`.
+
+### 3. Terminal 2 — frontend
+
+**macOS:**
+
+```bash
+cd frontend
+flutter pub get
+flutter run -d macos
+```
+
+**Windows:**
+
+```bash
+cd frontend
+flutter pub get
+flutter run -d windows
+```
+
+The frontend expects the backend on `http://localhost:5050` (hardcoded in
+`frontend/lib/core/api_client.dart`). If you change the backend port, update it
+in `appsettings.json`, `launchSettings.json`, and `api_client.dart` together.
+
+---
+
+## Platform support
+
+| Feature | macOS | Windows |
+|---------|:-----:|:-------:|
+| Generate speech / clone voices / gallery | ✅ | ✅ |
+| In-app audio playback | ✅ | ⚠️ not yet |
+
+⚠️ **Windows audio playback** — playback currently shells out to the macOS
+`afplay` command (`frontend/lib/core/audio_player.dart`). On Windows the app
+runs and generates/saves audio fine, but in-app playback won't work until this
+is swapped for a cross-platform Dart package (`just_audio` / `audioplayers`).
+See the "Known issues" section in [`CLAUDE.md`](./CLAUDE.md).
+
+---
+
+## Project layout
+
+```
+greyvetro-tts/
+├── backend/        # .NET 10, Clean Architecture (Domain/Application/Infrastructure/API)
+├── frontend/       # Flutter desktop (macOS + Windows)
+└── CLAUDE.md       # architecture, conventions, roadmap
+```
+
+## Troubleshooting
+
+- **Port 5050 already in use** — something else is on the port. Note macOS
+  AirPlay occupies `:5000`, so don't switch to that.
+- **Frontend can't reach the API / voices list is empty** — make sure the
+  backend terminal is running and reachable (`curl http://localhost:5050/voices`).
+- **Voice cloning fails** — Instant Voice Cloning requires a paid ElevenLabs
+  plan; it will error on a free account.

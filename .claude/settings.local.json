@@ -3,7 +3,14 @@
     "allow": [
       "Read(//usr/local/share/dotnet/**)",
       "Read(//usr/local/bin/**)",
-      "Read(//Users/MarkP/Developer/greyvetro-conversational-agent/**)"
+      "Read(//Users/MarkP/Developer/greyvetro-conversational-agent/**)",
+      "Bash(dotnet --version)",
+      "Bash(flutter --version)"
+    ],
+    "deny": [
+      "Read(./backend/Greyvetro.API/appsettings*.json)",
+      "Read(./**/.env)",
+      "Read(./**/secrets.json)"
     ]
   }
 }
