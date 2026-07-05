@@ -29,14 +29,31 @@ Run `flutter doctor` once to confirm your desktop toolchain is set up.
 
 ### 1. Configure the backend key (one time)
 
-Create `backend/Greyvetro.API/appsettings.json` (git-ignored — never commit it):
+The ElevenLabs key is read from an **environment variable**, never committed to
+the repo. .NET maps the double-underscore env var `ElevenLabs__ApiKey` onto the
+config key `ElevenLabs:ApiKey`.
 
-```json
-{
-  "ElevenLabs": { "ApiKey": "sk_..." },
-  "Urls": "http://localhost:5050"
-}
+**macOS / Linux** — add it to your shell profile (`~/.zshrc`):
+
+```bash
+export ElevenLabs__ApiKey="sk_..."
 ```
+
+Then reload the shell (`source ~/.zshrc` or open a new terminal). Verify with
+`echo $ElevenLabs__ApiKey`.
+
+**Windows (PowerShell)**:
+
+```powershell
+setx ElevenLabs__ApiKey "sk_..."
+```
+
+Then open a new terminal so the variable is picked up.
+
+> The git-ignored `backend/Greyvetro.API/appsettings.json` holds only non-secret
+> config (`Urls`, logging). You *can* put the key there under
+> `"ElevenLabs": { "ApiKey": "sk_..." }` instead of the env var — .NET reads
+> either — but keep the key out of any committed file.
 
 ### 2. Terminal 1 — backend
 

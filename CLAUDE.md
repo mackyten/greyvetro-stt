@@ -41,10 +41,15 @@ greyvetro-tts/
 ```bash
 dotnet run --project Greyvetro.API     # serves http://localhost:5050
 ```
-Requires `Greyvetro.API/appsettings.json` (git-ignored) with:
-```json
-{ "ElevenLabs": { "ApiKey": "sk_..." } }
+Requires the ElevenLabs API key in the environment variable `ElevenLabs__ApiKey`
+(the double underscore maps to the config key `ElevenLabs:ApiKey`). On macOS,
+export it from `~/.zshrc`:
+```bash
+export ElevenLabs__ApiKey="sk_..."
 ```
+Alternatively, put it in the git-ignored `Greyvetro.API/appsettings.json` under
+`{ "ElevenLabs": { "ApiKey": "sk_..." } }` — .NET reads either. Keep the key out
+of any committed file.
 
 **Frontend** (from `frontend/`):
 ```bash
