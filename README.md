@@ -93,13 +93,12 @@ in `appsettings.json`, `launchSettings.json`, and `api_client.dart` together.
 | Feature | macOS | Windows |
 |---------|:-----:|:-------:|
 | Generate speech / clone voices / gallery | ✅ | ✅ |
-| In-app audio playback | ✅ | ⚠️ not yet |
+| In-app audio playback + seek/scrubber | ✅ | ✅ |
 
-⚠️ **Windows audio playback** — playback currently shells out to the macOS
-`afplay` command (`frontend/lib/core/audio_player.dart`). On Windows the app
-runs and generates/saves audio fine, but in-app playback won't work until this
-is swapped for a cross-platform Dart package (`just_audio` / `audioplayers`).
-See the "Known issues" section in [`CLAUDE.md`](./CLAUDE.md).
+In-app playback uses the cross-platform [`audioplayers`](https://pub.dev/packages/audioplayers)
+package, so it works on both macOS and Windows. Playing an item (in the Gallery
+or the composer preview) shows an interactive seek bar — drag or click anywhere
+on it to jump to that point.
 
 ---
 

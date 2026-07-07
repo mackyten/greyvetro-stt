@@ -66,6 +66,7 @@ class _VoicesScreenState extends State<VoicesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.brand;
     return FutureBuilder<List<VoiceModel>>(
       future: _voices,
       builder: (context, snapshot) {
@@ -82,7 +83,7 @@ class _VoicesScreenState extends State<VoicesScreen> {
                   Text(
                     'Could not load voices.\n${snapshot.error}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppColors.slate),
+                    style: TextStyle(color: c.text2),
                   ),
                   const SizedBox(height: 16),
                   OutlinedButton.icon(
@@ -115,18 +116,18 @@ class _VoicesScreenState extends State<VoicesScreen> {
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _reload,
-                color: AppColors.babyBlueDeep,
+                color: c.blueDeep,
                 child: filtered.isEmpty
                     ? ListView(
                         // AlwaysScrollable so pull-to-refresh still works
                         // even when no voices match the current search.
                         physics: const AlwaysScrollableScrollPhysics(),
-                        children: const [
-                          SizedBox(height: 120),
+                        children: [
+                          const SizedBox(height: 120),
                           Center(
                             child: Text(
                               'No voices match your search.',
-                              style: TextStyle(color: AppColors.slate),
+                              style: TextStyle(color: c.text3),
                             ),
                           ),
                         ],
@@ -155,35 +156,37 @@ class _VoicesScreenState extends State<VoicesScreen> {
     );
   }
 
-  Widget _searchBar() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search voices…',
-                  prefixIcon:
-                      const Icon(Icons.search_rounded, color: AppColors.slate),
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 20),
-                          onPressed: () => _searchController.clear(),
-                        ),
-                ),
+  Widget _searchBar() {
+    final c = context.brand;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search voices…',
+                prefixIcon: Icon(Icons.search_rounded, color: c.text3),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => _searchController.clear(),
+                      ),
               ),
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: AppColors.slate),
-              tooltip: 'Refresh voices',
-              onPressed: _reload,
-            ),
-          ],
-        ),
-      );
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(Icons.refresh_rounded, color: c.text2),
+            tooltip: 'Refresh voices',
+            onPressed: _reload,
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _genderChips(List<String> genders) => SizedBox(
         height: 44,
@@ -191,34 +194,37 @@ class _VoicesScreenState extends State<VoicesScreen> {
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 20),
           children: [
-            _chip('All', _genderFilter == null, () => setState(() => _genderFilter = null)),
+            _chip('All', _genderFilter == null,
+                () => setState(() => _genderFilter = null)),
             ...genders.map((g) => _chip(
                   _capitalize(g),
                   _genderFilter == g,
-                  () => setState(() => _genderFilter = _genderFilter == g ? null : g),
+                  () => setState(
+                      () => _genderFilter = _genderFilter == g ? null : g),
                 )),
           ],
         ),
       );
 
-  Widget _chip(String label, bool selected, VoidCallback onTap) => Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: ChoiceChip(
-          label: Text(label),
-          selected: selected,
-          onSelected: (_) => onTap(),
-          showCheckmark: false,
-          backgroundColor: AppColors.surface,
-          selectedColor: AppColors.babyBlue.withValues(alpha: 0.5),
-          side: BorderSide(
-            color: selected ? AppColors.babyBlueDeep : AppColors.outline,
-          ),
-          labelStyle: TextStyle(
-            color: AppColors.deep,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-          ),
+  Widget _chip(String label, bool selected, VoidCallback onTap) {
+    final c = context.brand;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => onTap(),
+        showCheckmark: false,
+        backgroundColor: c.surface,
+        selectedColor: c.blue.withValues(alpha: 0.28),
+        side: BorderSide(color: selected ? c.blueDeep : c.outline),
+        labelStyle: TextStyle(
+          color: c.text,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
-      );
+      ),
+    );
+  }
 
   Future<void> _openCreateVoice() async {
     final voice = await Navigator.of(context).push<VoiceModel>(
@@ -235,76 +241,88 @@ class _VoicesScreenState extends State<VoicesScreen> {
     widget.onVoiceSelected(voice);
   }
 
-  Widget _createVoiceButton() => Padding(
-        padding: const EdgeInsets.only(top: 4, bottom: 4),
-        child: Material(
-          color: AppColors.babyPink.withValues(alpha: 0.35),
+  Widget _createVoiceButton() {
+    final c = context.brand;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: Material(
+        color: c.pink.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(AppRadii.field),
+        child: InkWell(
           borderRadius: BorderRadius.circular(AppRadii.field),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppRadii.field),
-            onTap: _openCreateVoice,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(AppRadii.field),
-                border: Border.all(color: AppColors.babyPinkDeep.withValues(alpha: 0.5)),
-              ),
-              child: Row(
-                children: const [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.white,
-                    child: Icon(Icons.add_rounded, color: AppColors.babyPinkDeep),
+          onTap: _openCreateVoice,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadii.field),
+              border: Border.all(color: c.pinkDeep.withValues(alpha: 0.5)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: c.surface,
+                    shape: BoxShape.circle,
                   ),
-                  SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Create my voice',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.deep,
-                          ),
+                  alignment: Alignment.center,
+                  child: Icon(Icons.add_rounded, color: c.pinkDeep),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Create my voice',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: c.text,
                         ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Record or upload samples to clone a voice',
-                          style: TextStyle(fontSize: 13, color: AppColors.slate),
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Record or upload samples to clone a voice',
+                        style: TextStyle(fontSize: 13, color: c.text3),
+                      ),
+                    ],
                   ),
-                  Icon(Icons.chevron_right_rounded, color: AppColors.slate),
-                ],
-              ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: c.text3),
+              ],
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 
-  Widget _sectionHeader(String title) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-        child: Text(
-          title.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
-            color: AppColors.slate,
-          ),
+  Widget _sectionHeader(String title) {
+    final c = context.brand;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+      child: Text(
+        title.toUpperCase(),
+        style: AppFonts.monoStyle(
+          size: 11,
+          weight: FontWeight.w500,
+          color: c.text3,
+          letterSpacing: 1.2,
         ),
-      );
+      ),
+    );
+  }
 
   Widget _tile(VoiceModel v) {
+    final c = context.brand;
     final selected = widget.selectedVoice?.id == v.id;
     final subtitle = v.tagline;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
-        color: selected ? AppColors.babyBlue.withValues(alpha: 0.25) : AppColors.surface,
+        color: selected ? c.blue.withValues(alpha: 0.16) : c.surface,
         borderRadius: BorderRadius.circular(AppRadii.field),
         child: InkWell(
           borderRadius: BorderRadius.circular(AppRadii.field),
@@ -313,22 +331,32 @@ class _VoicesScreenState extends State<VoicesScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.field),
               border: Border.all(
-                color: selected ? AppColors.babyBlueDeep : AppColors.outline,
+                color: selected ? c.blueDeep : c.outline,
                 width: selected ? 1.5 : 1,
               ),
             ),
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: (v.isCustom ? AppColors.babyPink : AppColors.babyBlue)
-                      .withValues(alpha: 0.45),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: v.isCustom
+                        ? LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [c.pinkDeep, c.pink],
+                          )
+                        : c.sliderGradient,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.center,
                   child: Text(
                     v.name.isNotEmpty ? v.name[0].toUpperCase() : '?',
                     style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.deep,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
                     ),
                   ),
                 ),
@@ -339,10 +367,10 @@ class _VoicesScreenState extends State<VoicesScreen> {
                     children: [
                       Text(
                         v.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.deep,
+                          fontWeight: FontWeight.w700,
+                          color: c.text,
                         ),
                       ),
                       if (subtitle.isNotEmpty) ...[
@@ -351,14 +379,14 @@ class _VoicesScreenState extends State<VoicesScreen> {
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, color: AppColors.slate),
+                          style: TextStyle(fontSize: 13, color: c.text3),
                         ),
                       ],
                     ],
                   ),
                 ),
                 if (selected)
-                  const Icon(Icons.check_circle_rounded, color: AppColors.babyBlueDeep),
+                  Icon(Icons.check_circle_rounded, color: c.blueDeep),
               ],
             ),
           ),

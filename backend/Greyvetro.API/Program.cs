@@ -8,8 +8,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
-var apiKey = builder.Configuration["ElevenLabs:ApiKey"]
-    ?? throw new InvalidOperationException("ElevenLabs:ApiKey is required.");
+var apiKey = builder.Configuration["ELEVENLABS_APIKEY"]
+    ?? throw new InvalidOperationException("ELEVENLABS_APIKEY is required.");
 
 builder.Services.AddInfrastructure(apiKey);
 

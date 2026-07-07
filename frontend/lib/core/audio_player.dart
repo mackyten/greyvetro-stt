@@ -1,16 +1,38 @@
-import 'dart:io';
+import 'dart:async';
+import 'package:audioplayers/audioplayers.dart' as ap;
 import 'package:flutter/foundation.dart';
 
-/// Minimal audio player. Currently shells out to macOS `afplay`.
+/// Cross-platform audio player (macOS + Windows) backed by `audioplayers`.
 ///
-/// NOTE: macOS-only. Replace with a cross-platform package (e.g. just_audio)
-/// when Windows support is needed — see CLAUDE.md known issues.
+/// Keeps the simple play/stop/toggle API the app already uses, and adds
+/// [position] / [duration] streams plus [seek] so widgets can render a
+/// scrubber. Position and duration reflect the currently [playing] track.
 class AudioPlayer {
-  Process? _process;
+  final ap.AudioPlayer _player = ap.AudioPlayer();
 
   /// Absolute path of the file currently playing, or null. Listenable so
   /// widgets can reflect play/stop state.
   final ValueNotifier<String?> playing = ValueNotifier(null);
+
+  /// Playback position of the active track.
+  final ValueNotifier<Duration> position = ValueNotifier(Duration.zero);
+
+  /// Total duration of the active track, or null until known.
+  final ValueNotifier<Duration?> duration = ValueNotifier(null);
+
+  late final StreamSubscription<Duration> _posSub;
+  late final StreamSubscription<Duration> _durSub;
+  late final StreamSubscription<void> _completeSub;
+
+  AudioPlayer() {
+    _player.setReleaseMode(ap.ReleaseMode.stop);
+    _posSub = _player.onPositionChanged.listen((p) => position.value = p);
+    _durSub = _player.onDurationChanged.listen((d) => duration.value = d);
+    _completeSub = _player.onPlayerComplete.listen((_) {
+      playing.value = null;
+      position.value = Duration.zero;
+    });
+  }
 
   bool isPlaying(String path) => playing.value == path;
 
@@ -23,26 +45,32 @@ class AudioPlayer {
   }
 
   Future<void> play(String path) async {
-    await stop();
-    final process = await Process.start('afplay', [path]);
-    _process = process;
+    await _player.stop();
+    position.value = Duration.zero;
+    duration.value = null;
+    await _player.play(ap.DeviceFileSource(path));
     playing.value = path;
-    process.exitCode.then((_) {
-      if (_process == process) {
-        _process = null;
-        playing.value = null;
-      }
-    });
   }
 
   Future<void> stop() async {
-    _process?.kill();
-    _process = null;
+    await _player.stop();
     playing.value = null;
+    position.value = Duration.zero;
+  }
+
+  /// Jump the active track to [to].
+  Future<void> seek(Duration to) async {
+    await _player.seek(to);
+    position.value = to;
   }
 
   void dispose() {
-    _process?.kill();
+    _posSub.cancel();
+    _durSub.cancel();
+    _completeSub.cancel();
+    _player.dispose();
     playing.dispose();
+    position.dispose();
+    duration.dispose();
   }
 }

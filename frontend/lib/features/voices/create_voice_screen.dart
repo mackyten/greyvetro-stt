@@ -175,7 +175,7 @@ class _CreateVoiceScreenState extends State<CreateVoiceScreen> {
                 _samplesSection(),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
-                  Text(_error!, style: const TextStyle(color: AppColors.babyPinkDeep)),
+                  Text(_error!, style: TextStyle(color: context.brand.danger)),
                 ],
                 const SizedBox(height: 24),
                 FilledButton.icon(
@@ -198,70 +198,76 @@ class _CreateVoiceScreenState extends State<CreateVoiceScreen> {
     );
   }
 
-  Widget _infoBanner() => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.babyBlue.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(AppRadii.field),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.tips_and_updates_rounded, color: AppColors.babyBlueDeep),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Add one or more clear samples of the voice (ideally a minute or '
-                'more total, no background noise). Record directly or upload audio files.',
-                style: TextStyle(fontSize: 13, color: AppColors.deep, height: 1.4),
-              ),
+  Widget _infoBanner() {
+    final c = context.brand;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.blue.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(AppRadii.field),
+        border: Border.all(color: c.blue.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.tips_and_updates_rounded, color: c.blueDeep),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Add one or more clear samples of the voice (ideally a minute or '
+              'more total, no background noise). Record directly or upload audio files.',
+              style: TextStyle(fontSize: 13, color: c.text, height: 1.4),
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
+  }
 
-  Widget _planWarning() => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.babyPink.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(AppRadii.field),
-          border: Border.all(color: AppColors.babyPinkDeep.withValues(alpha: 0.5)),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.workspace_premium_rounded, color: AppColors.babyPinkDeep),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Your current ElevenLabs plan doesn’t include voice cloning. '
-                'Upgrade to a paid plan to enable this — you can still prepare '
-                'samples now.',
-                style: TextStyle(fontSize: 13, color: AppColors.deep, height: 1.4),
-              ),
+  Widget _planWarning() {
+    final c = context.brand;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.warning.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(AppRadii.field),
+        border: Border.all(color: c.warning.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.workspace_premium_rounded, color: c.warning),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Your current ElevenLabs plan doesn’t include voice cloning. '
+              'Upgrade to a paid plan to enable this — you can still prepare '
+              'samples now.',
+              style: TextStyle(fontSize: 13, color: c.text, height: 1.4),
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _samplesSection() {
+    final c = context.brand;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'SAMPLES',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
-            color: AppColors.slate,
+          style: AppFonts.monoStyle(
+            size: 11,
+            color: c.text3,
+            letterSpacing: 1.2,
           ),
         ),
         const SizedBox(height: 10),
         ..._samples.map(_sampleTile),
         if (_samples.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text('No samples yet.',
-                style: TextStyle(color: AppColors.slate)),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('No samples yet.', style: TextStyle(color: c.text3)),
           ),
         const SizedBox(height: 12),
         Row(
@@ -271,7 +277,7 @@ class _CreateVoiceScreenState extends State<CreateVoiceScreen> {
                 onPressed: _toggleRecording,
                 icon: Icon(
                   _recording ? Icons.stop_circle_rounded : Icons.mic_rounded,
-                  color: _recording ? AppColors.babyPinkDeep : AppColors.babyBlueDeep,
+                  color: _recording ? c.pinkDeep : c.blueDeep,
                 ),
                 label: Text(_recording ? 'Stop recording' : 'Record'),
               ),
@@ -291,14 +297,15 @@ class _CreateVoiceScreenState extends State<CreateVoiceScreen> {
   }
 
   Widget _sampleTile(_Sample s) {
+    final c = context.brand;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: c.surface,
           borderRadius: BorderRadius.circular(AppRadii.field),
-          border: Border.all(color: AppColors.outline),
+          border: Border.all(color: c.outline),
         ),
         child: ValueListenableBuilder<String?>(
           valueListenable: widget.player.playing,
@@ -310,25 +317,27 @@ class _CreateVoiceScreenState extends State<CreateVoiceScreen> {
                   icon: Icon(isPlaying
                       ? Icons.stop_rounded
                       : Icons.play_arrow_rounded),
-                  color: AppColors.babyBlueDeep,
+                  color: c.blueDeep,
                   onPressed: () => _playSample(s),
                 ),
                 Icon(
-                  s.recorded ? Icons.mic_rounded : Icons.insert_drive_file_rounded,
+                  s.recorded
+                      ? Icons.mic_rounded
+                      : Icons.insert_drive_file_rounded,
                   size: 16,
-                  color: AppColors.slate,
+                  color: c.text3,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     s.label,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: AppColors.deep),
+                    style: TextStyle(color: c.text),
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.delete_outline_rounded),
-                  color: AppColors.slate,
+                  color: c.text3,
                   onPressed: () => _removeSample(s),
                 ),
               ],
