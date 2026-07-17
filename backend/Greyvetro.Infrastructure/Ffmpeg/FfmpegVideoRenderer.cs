@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Greyvetro.Domain.Entities;
 using Greyvetro.Domain.Interfaces;
@@ -20,19 +19,12 @@ public class FfmpegVideoRenderer(ILogger<FfmpegVideoRenderer> logger) : IVideoRe
     private const int Fps = 30;
     private const string PlaceholderColor = "0x1A1F26";
 
-    private static readonly string[] FfmpegCandidates =
-    [
-        "/opt/homebrew/bin/ffmpeg", // Apple Silicon Homebrew
-        "/usr/local/bin/ffmpeg",    // Intel Homebrew
-        "ffmpeg",                   // PATH
-    ];
-
     public async Task<byte[]> RenderAsync(RenderJob job, CancellationToken ct = default)
     {
         if (job.Scenes.Count == 0)
             throw new ArgumentException("At least one scene is required.");
 
-        var ffmpeg = FindFfmpeg()
+        var ffmpeg = FfmpegProcess.Find()
             ?? throw new InvalidOperationException(
                 "ffmpeg was not found. Install it with `brew install ffmpeg` and restart the backend.");
 
@@ -51,13 +43,13 @@ public class FfmpegVideoRenderer(ILogger<FfmpegVideoRenderer> logger) : IVideoRe
                 var duration = SegmentDuration(scenes, i);
                 if (scenes[i].Image is { } image)
                 {
-                    var imagePath = Path.Combine(dir, $"img_{i}{ImageExtension(image)}");
+                    var imagePath = Path.Combine(dir, $"img_{i}{FfmpegProcess.ImageExtension(image)}");
                     await File.WriteAllBytesAsync(imagePath, image, ct);
-                    args.AddRange(["-loop", "1", "-t", Fmt(duration), "-i", imagePath]);
+                    args.AddRange(["-loop", "1", "-t", FfmpegProcess.Fmt(duration), "-i", imagePath]);
                 }
                 else
                 {
-                    args.AddRange(["-f", "lavfi", "-t", Fmt(duration), "-i",
+                    args.AddRange(["-f", "lavfi", "-t", FfmpegProcess.Fmt(duration), "-i",
                         $"color=c={PlaceholderColor}:s={Width}x{Height}:r={Fps}"]);
                 }
 
@@ -82,7 +74,7 @@ public class FfmpegVideoRenderer(ILogger<FfmpegVideoRenderer> logger) : IVideoRe
                 outPath,
             ]);
 
-            await RunFfmpegAsync(ffmpeg, args, ct);
+            await FfmpegProcess.RunAsync(ffmpeg, args, logger, ct);
             var bytes = await File.ReadAllBytesAsync(outPath, ct);
             logger.LogInformation("Rendered {Scenes} scenes to a {Size:N0}-byte mp4", scenes.Count, bytes.Length);
             return bytes;
@@ -105,59 +97,4 @@ public class FfmpegVideoRenderer(ILogger<FfmpegVideoRenderer> logger) : IVideoRe
         var end = i == scenes.Count - 1 ? scenes[i].End + 1.5 : scenes[i + 1].Start;
         return Math.Max(0.5, end - start);
     }
-
-    private static string? FindFfmpeg()
-    {
-        foreach (var candidate in FfmpegCandidates)
-        {
-            try
-            {
-                using var probe = Process.Start(new ProcessStartInfo(candidate, "-version")
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                });
-                probe?.WaitForExit(5000);
-                if (probe?.ExitCode == 0) return candidate;
-            }
-            catch
-            {
-                // candidate not present — try the next one
-            }
-        }
-        return null;
-    }
-
-    private async Task RunFfmpegAsync(string ffmpeg, List<string> args, CancellationToken ct)
-    {
-        var info = new ProcessStartInfo(ffmpeg)
-        {
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-        };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
-
-        using var process = Process.Start(info)
-            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        if (process.ExitCode != 0)
-        {
-            var tail = stderr.Length > 2000 ? stderr[^2000..] : stderr;
-            logger.LogWarning("ffmpeg failed ({Code}): {Stderr}", process.ExitCode, tail);
-            throw new InvalidOperationException($"ffmpeg failed (exit {process.ExitCode}): {tail}");
-        }
-    }
-
-    private static string ImageExtension(byte[] image) => image switch
-    {
-        [0x89, 0x50, 0x4E, 0x47, ..] => ".png",
-        [0xFF, 0xD8, ..] => ".jpg",
-        [0x52, 0x49, 0x46, 0x46, ..] => ".webp",
-        [0x47, 0x49, 0x46, ..] => ".gif",
-        _ => ".png",
-    };
-
-    private static string Fmt(double seconds) =>
-        seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 }

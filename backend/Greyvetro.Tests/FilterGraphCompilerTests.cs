@@ -1,0 +1,302 @@
+using Greyvetro.Domain.Entities;
+using Greyvetro.Infrastructure.Ffmpeg;
+
+namespace Greyvetro.Tests;
+
+public class FilterGraphCompilerTests
+{
+    private readonly FilterGraphCompiler _compiler = new();
+
+    /// <summary>Line-ending-agnostic comparison (AppendLine emits Environment.NewLine).</summary>
+    private static string Norm(string s) => s.Replace("\r\n", "\n");
+
+    /// <summary>
+    /// A photo track + audio track, seeded exactly as the legacy scene renderer laid out its
+    /// segments (first pulled to 0, last padded 1.5s), plus resolved asset paths.
+    /// </summary>
+    private static (Timeline timeline, Dictionary<string, string> paths) LegacyLikeCase()
+    {
+        var timeline = new Timeline
+        {
+            Id = "t1",
+            OutputWidth = 1080,
+            OutputHeight = 1920,
+            Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Id = "photo", Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0,   Duration = 2.5 },
+                        new Clip { Id = "c1", SourceId = "img-1", StartTime = 2.5, Duration = 3.5 },
+                        new Clip { Id = "c2", SourceId = "img-2", StartTime = 6.0, Duration = 4.5 },
+                    ],
+                },
+                new Track
+                {
+                    Id = "audio", Type = TrackType.Audio, ZIndex = 0,
+                    Clips = [new Clip { Id = "a0", SourceId = "voice", StartTime = 0, Duration = 9.0 }],
+                },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg",
+            ["img-1"] = "/tmp/b.jpg",
+            ["img-2"] = "/tmp/c.jpg",
+            ["voice"] = "/tmp/voice.mp3",
+        };
+        return (timeline, paths);
+    }
+
+    // Regression gate (docs/timeline-editor-plan.md §6, build step 1): for a single visual
+    // track + single audio track, the compiler must emit the SAME filter graph the legacy
+    // FfmpegVideoRenderer produced — the proof that the model faithfully represents today.
+    [Fact]
+    public void Compile_SingleVisualAndAudio_ReproducesLegacyFilterGraph()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        const string expectedFilter =
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0];\n" +
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1];\n" +
+            "[2:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v2];\n" +
+            "[v0][v1][v2]concat=n=3:v=1:a=0[vout]";
+        Assert.Equal(expectedFilter, Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_SingleVisualAndAudio_ReproducesLegacyInputArgs()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "2.5", "-i", "/tmp/a.jpg",
+                "-loop", "1", "-t", "3.5", "-i", "/tmp/b.jpg",
+                "-loop", "1", "-t", "4.5", "-i", "/tmp/c.jpg",
+                "-i", "/tmp/voice.mp3",
+            },
+            plan.InputArgs);
+    }
+
+    [Fact]
+    public void Compile_SingleVisualAndAudio_ReproducesLegacyOutputArgs()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Audio input index == the visual-clip count (3), as in the legacy renderer.
+        Assert.Equal(
+            new[]
+            {
+                "-map", "[vout]", "-map", "3:a",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest", "-movflags", "+faststart",
+            },
+            plan.OutputArgs);
+    }
+
+    [Fact]
+    public void Compile_MissingVisualSource_EmitsPlaceholderColorInput()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        paths.Remove("img-1"); // second clip has no supplied image
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains("-f", plan.InputArgs);
+        Assert.Contains("lavfi", plan.InputArgs);
+        Assert.Contains("color=c=0x1A1F26:s=1080x1920:r=30", plan.InputArgs);
+    }
+
+    [Fact]
+    public void Compile_HonorsCustomOutputResolutionAndFps()
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080,
+            OutputHeight = 1080,
+            Fps = 24,
+            Tracks =
+            [
+                new Track { Type = TrackType.Photo, Clips = [new Clip { SourceId = "img", Duration = 3 }] },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "aud", Duration = 3 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string> { ["img"] = "/tmp/i.png", ["aud"] = "/tmp/a.mp3" };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains("scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080,setsar=1,fps=24",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_OrdersVisualClipsByStartTime()
+    {
+        var timeline = new Timeline
+        {
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo,
+                    Clips =
+                    [
+                        new Clip { SourceId = "late", StartTime = 5, Duration = 2 },
+                        new Clip { SourceId = "early", StartTime = 0, Duration = 5 },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "aud", Duration = 7 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["early"] = "/tmp/early.jpg",
+            ["late"] = "/tmp/late.jpg",
+            ["aud"] = "/tmp/a.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        var earlyIdx = plan.InputArgs.ToList().IndexOf("/tmp/early.jpg");
+        var lateIdx = plan.InputArgs.ToList().IndexOf("/tmp/late.jpg");
+        Assert.True(earlyIdx < lateIdx, "clips must be laid out in start-time order");
+    }
+
+    [Fact]
+    public void Compile_NoVisualTrack_Throws()
+    {
+        var timeline = new Timeline
+        {
+            Tracks = [new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "aud", Duration = 3 }] }],
+        };
+        var paths = new Dictionary<string, string> { ["aud"] = "/tmp/a.mp3" };
+
+        Assert.Throws<ArgumentException>(() => _compiler.Compile(timeline, paths));
+    }
+
+    [Fact]
+    public void Compile_NoAudioTrack_Throws()
+    {
+        var timeline = new Timeline
+        {
+            Tracks = [new Track { Type = TrackType.Photo, Clips = [new Clip { SourceId = "img", Duration = 3 }] }],
+        };
+        var paths = new Dictionary<string, string> { ["img"] = "/tmp/i.jpg" };
+
+        Assert.Throws<ArgumentException>(() => _compiler.Compile(timeline, paths));
+    }
+
+    // --- Video-clip ingestion (minimal slice) ---
+
+    /// <summary>A still photo followed by a real video clip on the base layer, + a voiceover.</summary>
+    private static (Timeline, Dictionary<string, string>) PhotoPlusVideoCase()
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080,
+            OutputHeight = 1920,
+            Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Id = "photo", Type = TrackType.Photo, ZIndex = 0,
+                    Clips = [new Clip { Id = "p0", SourceId = "img", StartTime = 0, Duration = 3 }],
+                },
+                new Track
+                {
+                    Id = "video", Type = TrackType.Video, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "vc", SourceId = "vid", StartTime = 3, Duration = 4, InPoint = 0.5, OutPoint = 4.5 },
+                    ],
+                },
+                new Track
+                {
+                    Id = "audio", Type = TrackType.Audio, ZIndex = 0,
+                    Clips = [new Clip { Id = "a0", SourceId = "aud", StartTime = 0, Duration = 9 }],
+                },
+            ],
+            Assets =
+            [
+                new MediaAsset { Id = "img", Type = MediaType.Image },
+                new MediaAsset { Id = "vid", Type = MediaType.Video },
+                new MediaAsset { Id = "aud", Type = MediaType.Audio },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img"] = "/tmp/i.jpg",
+            ["vid"] = "/tmp/v.mp4",
+            ["aud"] = "/tmp/a.mp3",
+        };
+        return (timeline, paths);
+    }
+
+    [Fact]
+    public void Compile_VideoClip_UsesInputSeekAndTrim_NotLoopedStill()
+    {
+        var (timeline, paths) = PhotoPlusVideoCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Photo stays a looped still; the video is input-seeked to its in-point and read for its
+        // duration (real motion), and merged after the photo in start-time order.
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "3", "-i", "/tmp/i.jpg",
+                "-ss", "0.5", "-t", "4", "-i", "/tmp/v.mp4",
+                "-i", "/tmp/a.mp3",
+            },
+            plan.InputArgs);
+    }
+
+    [Fact]
+    public void Compile_VideoPresent_ConcatsBothAndPadsAudio()
+    {
+        var (timeline, paths) = PhotoPlusVideoCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        const string expectedFilter =
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0];\n" +
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1];\n" +
+            "[v0][v1]concat=n=2:v=1:a=0[vout];[2:a]apad[aout]";
+        Assert.Equal(expectedFilter, Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_VideoPresent_MapsPaddedAudio()
+    {
+        var (timeline, paths) = PhotoPlusVideoCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // The padded voiceover ([aout]) is mapped instead of a raw stream, and -shortest is kept
+        // so the visual concat (with the appended video) becomes the master length.
+        Assert.Equal(
+            new[]
+            {
+                "-map", "[vout]", "-map", "[aout]",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest", "-movflags", "+faststart",
+            },
+            plan.OutputArgs);
+    }
+}

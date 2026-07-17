@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Greyvetro.Application.Features.Render;
 using Greyvetro.Application.Features.Script;
 using Greyvetro.Application.Features.SpeechToText;
@@ -122,9 +123,56 @@ app.MapPost("/script/scenes", async (GenerateScenesRequest req, GenerateScenesHa
     }
 });
 
-app.MapPost("/render", async (HttpRequest http, RenderVideoHandler handler, CancellationToken ct) =>
+// Timeline DTOs arrive camelCase with string enum values ("photo", "audio", …).
+var timelineJsonOptions = new JsonSerializerOptions(JsonSerializerOptions.Web);
+timelineJsonOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+
+app.MapPost("/render", async (
+    HttpRequest http, RenderVideoHandler legacy, RenderTimelineHandler timelineHandler, CancellationToken ct) =>
 {
     var form = await http.ReadFormAsync(ct);
+
+    // Timeline editor path (Phase 5): a structured Timeline DTO + `asset-<id>` blobs.
+    // Absence of the `timeline` field falls through to the legacy scene path below.
+    if (form.TryGetValue("timeline", out var timelineJson) && !string.IsNullOrWhiteSpace(timelineJson))
+    {
+        Timeline? timeline;
+        try
+        {
+            timeline = JsonSerializer.Deserialize<Timeline>(timelineJson.ToString(), timelineJsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            return Results.BadRequest($"Malformed timeline: {ex.Message}");
+        }
+        if (timeline is null || timeline.Tracks.Count == 0)
+            return Results.BadRequest("A timeline with at least one track is required.");
+
+        var assets = new Dictionary<string, byte[]>();
+        foreach (var file in form.Files)
+        {
+            if (!file.Name.StartsWith("asset-", StringComparison.Ordinal)) continue;
+            using var ms = new MemoryStream();
+            await file.OpenReadStream().CopyToAsync(ms, ct);
+            assets[file.Name["asset-".Length..]] = ms.ToArray();
+        }
+
+        try
+        {
+            var mp4 = await timelineHandler.HandleAsync(new RenderTimelineCommand(timeline, assets), ct);
+            return Results.File(mp4, "video/mp4", "video.mp4");
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: 503);
+        }
+    }
+
+    // Legacy scene path (Phase 4): `audio` + `scenes` JSON + `image-<n>` blobs.
     var audio = form.Files["audio"];
     if (audio is null)
         return Results.BadRequest("A voiceover audio file is required.");
@@ -152,7 +200,7 @@ app.MapPost("/render", async (HttpRequest http, RenderVideoHandler handler, Canc
     var job = new RenderJob { Audio = audioMs.ToArray(), Scenes = scenes };
     try
     {
-        var mp4 = await handler.HandleAsync(new RenderVideoCommand(job), ct);
+        var mp4 = await legacy.HandleAsync(new RenderVideoCommand(job), ct);
         return Results.File(mp4, "video/mp4", "video.mp4");
     }
     catch (InvalidOperationException ex)

@@ -5,15 +5,17 @@ import { useTheme } from './core/useTheme';
 import { GalleryScreen } from './features/gallery/GalleryScreen';
 import { PresetsScreen } from './features/presets/PresetsScreen';
 import { StoryboardScreen } from './features/storyboard/StoryboardScreen';
+import { TimelineScreen } from './features/timeline/TimelineScreen';
 import { Composer } from './features/tts/Composer';
 import { UsageCard } from './features/usage/UsageCard';
 
-type Tab = 'studio' | 'gallery' | 'storyboard' | 'presets';
+type Tab = 'studio' | 'gallery' | 'storyboard' | 'timeline' | 'presets';
 
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'studio', icon: '🎙', label: 'Studio' },
   { id: 'gallery', icon: '🎧', label: 'Gallery' },
   { id: 'storyboard', icon: '🎬', label: 'Storyboard' },
+  { id: 'timeline', icon: '🎞', label: 'Timeline' },
   { id: 'presets', icon: '🎚', label: 'Presets' },
 ];
 
@@ -23,6 +25,10 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   storyboard: {
     title: 'Storyboard',
     subtitle: 'Turn a project’s voiceover into timed scenes with images, then preview the cut.',
+  },
+  timeline: {
+    title: 'Timeline',
+    subtitle: 'The storyboard laid out as editable tracks — the source of truth for the render.',
   },
   presets: { title: 'Presets', subtitle: 'Saved voice + settings bundles, ready to re-apply.' },
 };
@@ -98,6 +104,7 @@ export default function App() {
           />
         )}
         {tab === 'storyboard' && <StoryboardScreen />}
+        {tab === 'timeline' && <TimelineScreen />}
         {tab === 'presets' && <PresetsScreen onUse={(p) => loadIntoComposer(p)} />}
       </main>
     </div>

@@ -49,9 +49,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<GenerateScriptHandler>();
         services.AddScoped<GenerateScenesHandler>();
 
-        // ffmpeg render (Greyvetro Studio Phase 4).
+        // ffmpeg render (Greyvetro Studio Phase 4 — legacy scene path).
         services.AddScoped<IVideoRenderService, FfmpegVideoRenderer>();
         services.AddScoped<RenderVideoHandler>();
+
+        // Timeline editor render (Greyvetro Studio Phase 5). The compiler is a pure,
+        // stateless function — a singleton — driving the ffmpeg-executing renderer.
+        services.AddSingleton<FilterGraphCompiler>();
+        services.AddScoped<ITimelineRenderer, FfmpegTimelineRenderer>();
+        services.AddScoped<RenderTimelineHandler>();
         return services;
     }
 }

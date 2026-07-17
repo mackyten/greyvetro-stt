@@ -1,3 +1,4 @@
+import type { Timeline as TimelineDoc } from '../features/timeline/model/types';
 import {
   DEFAULT_MODEL_ID,
   type Scene,
@@ -102,6 +103,22 @@ export async function renderVideo(audio: Blob, scenes: RenderScenePayload[]): Pr
     JSON.stringify(scenes.map((s, i) => ({ start: s.start, end: s.end, imageIndex: i }))),
   );
   scenes.forEach((s, i) => form.append(`image-${i}`, s.image, `image-${i}.jpg`));
+  const res = await checkStatus(await fetch(`${BASE}/render`, { method: 'POST', body: form }));
+  return res.blob();
+}
+
+/**
+ * Render a timeline document to a vertical mp4 (Greyvetro Studio Phase 5). The structured
+ * Timeline DTO goes as JSON; each referenced asset blob rides along as `asset-<sourceId>`.
+ * No ffmpeg syntax ever crosses the wire — the backend compiles the filter graph.
+ */
+export async function renderTimeline(
+  timeline: TimelineDoc,
+  assets: Record<string, Blob>,
+): Promise<Blob> {
+  const form = new FormData();
+  form.append('timeline', JSON.stringify(timeline));
+  for (const [id, blob] of Object.entries(assets)) form.append(`asset-${id}`, blob, `asset-${id}`);
   const res = await checkStatus(await fetch(`${BASE}/render`, { method: 'POST', body: form }));
   return res.blob();
 }

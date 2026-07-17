@@ -50,7 +50,7 @@ greyvetro-tts/
 - Transient confirmations use **snackbars** (`core/toast.tsx`: `ToastProvider` wraps `App` in `main.tsx`; call `useToast()(message, variant?)`, variants success/error/info, bottom-center, auto-dismiss ~3s) — never inline notice banners. Inline `error-banner` remains only for persistent contextual errors (e.g. generation failures next to the Generate button).
 - Full feature parity with the Flutter app: composer, voice picker, voice settings, playback/download, usage card, dark mode, **Gallery** (IndexedDB stores metadata + audio blobs per generation, browser-local), **Presets** (localStorage JSON index, same name-independent duplicate guard), and **Create-my-voice** (MediaRecorder recording or file upload → `/voices/clone`). Cross-screen flows ("Use these settings", "Edit & regenerate", preset "Use") pass a `Draft` object down from `App`; the composer stays mounted across tab switches so its state persists.
 - **Take workflow**: generating creates an in-memory unsaved take (`Take` in `Composer.tsx`) and opens the **Review take modal** (`features/tts/TakeReviewModal.tsx`) — nothing is persisted until the user clicks **Save to \<project\>** there (other options: Regenerate, Discard). Closing the modal keeps the take; a "Review take" pill in the rail reopens it. The gallery holds only saved takes.
-- **Projects** (web-only): clips group into projects for video work. Composer "Project" selector (`features/projects/ProjectSelect.tsx`, active id in localStorage) sets the save target; saved takes get an auto-title. Gallery chip row filters by project and offers inline clip rename, move-to-project, per-clip `<project>-<clip>.mp3` downloads, and a per-view zip export (`jszip`). Deleting a project moves its clips to Unsorted (and deletes its storyboard scenes). IndexedDB is at **version 3** (`core/db.ts`: `gallery` + `projects` + `scenes` stores) — bump the version there when adding stores.
+- **Projects** (web-only): clips group into projects for video work. Composer "Project" selector (`features/projects/ProjectSelect.tsx`, active id in localStorage) sets the save target; saved takes get an auto-title. Gallery chip row filters by project and offers inline clip rename, move-to-project, per-clip `<project>-<clip>.mp3` downloads, and a per-view zip export (`jszip`). Deleting a project moves its clips to Unsorted (and deletes its storyboard scenes). IndexedDB is at **version 5** (`core/db.ts`: `gallery` + `projects` + `scenes` + `timelines` + `timelineAssets` stores) — bump the version there when adding stores.
 
 ---
 
@@ -196,6 +196,50 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
      `/opt/homebrew/bin` → `/usr/local/bin` → PATH, 503 with install hint if
      missing). Verified: 5-scene render → h264/aac 1080×1920@30, correct
      cover-crop + placeholder frames.
+   - 🚧 **Phase 5 — Timeline Editor** (in progress): replace the linear
+     Storyboard→Render step with a CapCut-style multi-track non-linear editor
+     (layered video/photo/audio, trim, crop, transform, transitions, Ken Burns,
+     multi-track audio). Full corrected architecture plan — data model, backend
+     C# `filter_complex` compiler, caption-overlay strategy, phased roadmap —
+     lives in **[docs/timeline-editor-plan.md](docs/timeline-editor-plan.md)**.
+     Non-negotiables it locks in (keep these when building): the ffmpeg compiler
+     is **pure C# in `Greyvetro.Infrastructure`**, driven by a structured
+     `Timeline` DTO (never client-emitted ffmpeg strings); captions stay
+     browser-rendered as **alpha-PNG overlay layers** (no server drawtext);
+     media blobs persist in IndexedDB (never blob URLs); v1 is **stills-first**
+     (video-clip ingestion deferred). ffmpeg build gate passed 2026-07-17 —
+     `zoompan`/`xfade`/`acrossfade`/`overlay`/`amix`/`afade`/`adelay` all present.
+     - ✅ **TL Phase 1 — Model + read-only timeline + regression**: `Timeline`/
+       `Track`/`Clip`/`MediaAsset` records (`Domain/Entities/Timeline.cs`) mirrored
+       by TS (`features/timeline/model/types.ts`). Pure `FilterGraphCompiler`
+       (`Infrastructure/Ffmpeg/`, xUnit `Greyvetro.Tests`) emits an `FfmpegPlan`;
+       `FfmpegTimelineRenderer` executes it (shared `FfmpegProcess` discovery/run
+       helper, extracted from the legacy renderer). `POST /render` now branches on
+       a `timeline` form field (structured `Timeline` DTO + `asset-<sourceId>`
+       blobs) → `ITimelineRenderer`; the legacy `audio`+`scenes`+`image-N` path is
+       untouched. New **Timeline** nav tab seeds a read-only timeline from the
+       active project's storyboard + voiceover (`seedTimelineFromScenes`) and
+       exports through the new path. Regression gate proven both ways: golden-string
+       tests assert the compiler reproduces the legacy filter graph, and a live
+       render of equivalent inputs was **byte-identical** to the legacy path
+       (1080×1920 h264 / aac, `-shortest`). Captions stay fused into the photo
+       frames this phase (compiler ignores caption tracks); they split into an
+       alpha overlay in TL Phase 3.
+     - ✅ **TL video-clip ingestion (minimal slice)** — pulled forward from the
+       "later/separate scope" item. `Timeline.Assets` (`MediaAsset` list) tells the
+       compiler a still (`image`, looped) from real video (`video`, trimmed): video
+       clips emit `-ss <inPoint> -t <duration> -i` and merge into the base-layer
+       `concat` in start-time order; when any video is present the voiceover is
+       `apad`-padded so `-shortest` stops at the visual length (an appended clip
+       isn't cut). Web: **🎬 Add video** on the Timeline tab (probe duration/dims +
+       poster frame via `features/timeline/media.ts`, blob in IndexedDB **v5**
+       `timelineAssets` store `timelineAssetRepo.ts`, appended via pure
+       `timelineOps.appendVideoClip`; `mergeVideoTracks` re-attaches added videos
+       when the storyboard re-seeds). The clip's own audio is muted in v1
+       (voiceover stays the only audio track). Verified: photo+video render →
+       6s@30 (180 frames), photo span still / video span motion (frame-diffed);
+       photo-only path byte-identical. Deferred: frame-accurate `<video>` scrub
+       preview, per-clip trim UI, video audio mixing.
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), Ken
