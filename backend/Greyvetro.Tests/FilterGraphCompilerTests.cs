@@ -299,4 +299,128 @@ public class FilterGraphCompilerTests
             },
             plan.OutputArgs);
     }
+
+    // --- Editor structural edits (Phase 2) ---
+
+    [Fact]
+    public void Compile_TwoPhotoClipsShareOneSource_EmitsAnInputPerClip()
+    {
+        // Splitting a still yields two clips referencing the same asset id. The compiler must emit
+        // a looped input per clip (not dedupe by source), so each half keeps its own timeline
+        // length — this is what makes the editor's splitClip render correctly.
+        var timeline = new Timeline
+        {
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "a", SourceId = "img", StartTime = 0, Duration = 2 },
+                        new Clip { Id = "b", SourceId = "img", StartTime = 2, Duration = 3 },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "aud", Duration = 5 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string> { ["img"] = "/tmp/i.jpg", ["aud"] = "/tmp/a.mp3" };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "2", "-i", "/tmp/i.jpg",
+                "-loop", "1", "-t", "3", "-i", "/tmp/i.jpg",
+                "-i", "/tmp/a.mp3",
+            },
+            plan.InputArgs);
+        Assert.Contains("concat=n=2:v=1:a=0[vout]", Norm(plan.FilterComplex));
+    }
+
+    // --- Multi-track audio (Phase 4) ---
+
+    /// <summary>A photo, a plain voiceover, and a music track (30% gain, 2s fade-out).</summary>
+    private static (Timeline, Dictionary<string, string>) VoiceoverPlusMusicCase(
+        double musicStart = 0, double? trackVolume = 0.3, double? fadeOut = 2, bool musicMuted = false)
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track { Id = "photo", Type = TrackType.Photo, ZIndex = 0,
+                    Clips = [new Clip { Id = "p0", SourceId = "img", StartTime = 0, Duration = 9 }] },
+                new Track { Id = "audio", Type = TrackType.Audio, ZIndex = 0,
+                    Clips = [new Clip { Id = "vo", SourceId = "voice", StartTime = 0, Duration = 9 }] },
+                new Track { Id = "music", Type = TrackType.Audio, ZIndex = 1, Volume = trackVolume, Muted = musicMuted,
+                    Clips = [new Clip { Id = "m0", SourceId = "music", StartTime = musicStart, Duration = 9, FadeOut = fadeOut }] },
+            ],
+            Assets =
+            [
+                new MediaAsset { Id = "img", Type = MediaType.Image },
+                new MediaAsset { Id = "voice", Type = MediaType.Audio },
+                new MediaAsset { Id = "music", Type = MediaType.Audio },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img"] = "/tmp/i.jpg", ["voice"] = "/tmp/voice.mp3", ["music"] = "/tmp/music.mp3",
+        };
+        return (timeline, paths);
+    }
+
+    [Fact]
+    public void Compile_VoiceoverPlusMusic_MixesWithVolumeFadeAndApad()
+    {
+        var (timeline, paths) = VoiceoverPlusMusicCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        const string expected =
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0];\n" +
+            "[v0]concat=n=1:v=1:a=0[vout];" +
+            "[1:a]anull[a0];" +
+            "[2:a]volume=0.3,afade=t=out:st=7:d=2[a1];" +
+            "[a0][a1]amix=inputs=2:normalize=0:dropout_transition=0[amixed];[amixed]apad[aout]";
+        Assert.Equal(expected, Norm(plan.FilterComplex));
+
+        // Each audio clip is its own input-seek-trimmed input, after the single photo input.
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "9", "-i", "/tmp/i.jpg",
+                "-ss", "0", "-t", "9", "-i", "/tmp/voice.mp3",
+                "-ss", "0", "-t", "9", "-i", "/tmp/music.mp3",
+            },
+            plan.InputArgs);
+        Assert.Contains("[aout]", plan.OutputArgs);
+    }
+
+    [Fact]
+    public void Compile_AudioClipWithStartTime_UsesAdelay()
+    {
+        var (timeline, paths) = VoiceoverPlusMusicCase(musicStart: 3, trackVolume: null, fadeOut: null);
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains("adelay=3000:all=1", Norm(plan.FilterComplex));
+        Assert.Contains("amix=inputs=2", Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_MutedAudioTrack_IsExcludedAndFallsBackToLegacyVoiceover()
+    {
+        // Muting the only extra track leaves a single plain voiceover — the legacy direct map, no mix.
+        var (timeline, paths) = VoiceoverPlusMusicCase(musicMuted: true);
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.DoesNotContain("amix", Norm(plan.FilterComplex));
+        Assert.DoesNotContain("[aout]", plan.OutputArgs);
+        Assert.Contains("1:a", plan.OutputArgs); // voiceover mapped directly (audio input index 1)
+    }
 }

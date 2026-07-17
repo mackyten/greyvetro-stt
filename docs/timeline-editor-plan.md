@@ -362,15 +362,43 @@ storyboard.
   storyboard seeds a `Timeline` (photo + audio + caption tracks) instead of a flat
   scene list; render tracks as horizontal bars (no editing); backend compiler step
   1 reproduces today's mp4. *Goal: prove the model represents what exists.*
-- **Phase 2 — Trim + reorder + split.** Drag to reorder, trim handles
-  (`inPoint`/`outPoint`/`duration`), split at playhead; basic frame-accurate
-  scrub in preview. Captions may stay fused this phase.
+- ✅ **Phase 2 — Trim + reorder + split (shipped 2026-07-18).** The read-only
+  timeline became an interactive editor (`TimelineEditor.tsx`): click-select,
+  HTML5 drag-to-reorder within a lane, pointer trim handles on both edges
+  (stills change `duration`; video also moves `inPoint`/`outPoint`, clamped to
+  the asset length), split at the playhead (`S`), delete (`Del`, guarded against
+  removing the last visual clip), a click-to-scrub playhead, and **Play/Pause**
+  playback — a rAF clock advances the playhead and drives the synced voiceover,
+  and a live frame+caption preview swaps stills as it plays (video shows its
+  poster; frame-accurate video preview stays deferred, §4 risk). Pure ops
+  (`reanchor`/`moveClip`/`trimClip`/`splitClip`/
+  `deleteClip` in `timelineOps.ts`) keep the base track contiguous (it's a
+  `concat`) and re-derive the display-only caption lane by source id. **The saved
+  timeline is now the source of truth** — the storyboard only seeds it the first
+  time; a **🔄 Re-sync** action rebuilds photo/caption/audio tracks from the
+  current storyboard (keeping added videos). No backend change: the compiler
+  already ordered by `startTime` and honored `duration`/`inPoint`/`outPoint`; a
+  new xUnit test locks that a split (two clips over one source) emits an input
+  per clip. Captions stay fused this phase (overlay split is Phase 3). Verified:
+  backend 12/12, `tsc -b && vite build` clean, 20/20 pure-ops assertions.
 - **Phase 3 — Layering + transform (captions split here).** Add/remove tracks,
   z-index layering in preview + compiler, crop/position/scale on the selected
   clip. **Captions move to their own alpha-overlay track now** (§5), because
   images start transforming independently.
-- **Phase 4 — Audio.** Multiple audio tracks (voiceover + music/SFX), per-track
-  volume/mute, fade in/out; `amix` + `adelay` + `afade` in the compiler.
+- ✅ **Phase 4 — Audio (shipped 2026-07-18, ahead of Phase 3 per the "light
+  editing" priority).** Multiple audio tracks (voiceover + music/SFX), per-track
+  volume/mute, fade in/out. The compiler grew a mix path: each unmuted audio clip
+  is an input-seek-trimmed input, gets `volume` (clip × track gain), `afade`
+  in/out, and `adelay` for placement, then `amix=inputs=N:normalize=0` + `apad`
+  so `-shortest` keeps the visual length as master. The single plain-voiceover
+  case stays on the legacy direct-map path (byte-for-similar; muting the only
+  extra track falls back to it). Web: **🎵 Add music** (probe duration, blob in
+  the `timelineAssets` store, clip clamped to timeline length at a default 0.3
+  gain), music clips are selectable with an inspector (track volume, mute, fade
+  in/out, remove); `mergeVideoTracks` became `mergeAddedMedia` so music survives
+  re-sync too. Verified: backend 15/15, build/lint clean, 16/16 audio-ops
+  assertions, and the exact `volume,afade,adelay,amix,apad` graph rendered by
+  ffmpeg end-to-end (h264+aac, 9.0s master length).
 - **Phase 5 — Motion.** Ken Burns (`zoompan`) on photos via keyframed
   `motion.from/to` (gated on §9).
 - **Phase 6 — Transitions + polish.** `xfade`/`acrossfade` (gated on §9),

@@ -7,18 +7,19 @@ import { getSceneImage, listScenes } from '../storyboard/sceneRepo';
 import { exportTimelineVideo } from './export/exportService';
 import { audioDuration, capturePoster, probeVideo } from './media';
 import { seedTimelineFromScenes } from './model/seed';
-import { appendVideoClip, mergeVideoTracks } from './model/timelineOps';
+import { addMusic, appendVideoClip, mergeAddedMedia } from './model/timelineOps';
 import type { Timeline } from './model/types';
 import { getAsset, saveAsset } from './timelineAssetRepo';
 import { getTimeline, saveTimeline } from './timelineRepo';
-import { TimelineView } from './TimelineView';
+import { TimelineEditor } from './TimelineEditor';
 
 /**
- * Timeline editor (Greyvetro Studio Phase 5) — read-only view + media ingestion. Seeds a
- * Timeline from the active project's storyboard + voiceover, lets the user bring in video clips
- * (appended after the scenes), persists it, and renders the tracks as bars. Export goes through
- * the backend Timeline render path, which trims/renders real video and burns captions into the
- * stills.
+ * Timeline editor (Greyvetro Studio Phase 5, Phase 2) — interactive multi-track editing. Seeds a
+ * Timeline from the active project's storyboard + voiceover the first time, then the saved
+ * timeline is the source of truth: the user reorders / trims / splits / deletes clips and brings
+ * in video, all persisted. "Re-sync from storyboard" rebuilds the photo/caption/audio tracks from
+ * the current storyboard (keeping added videos). Export goes through the backend Timeline render
+ * path, which trims/renders real video and burns captions into the stills.
  */
 export function TimelineScreen() {
   const toast = useToast();
@@ -28,9 +29,11 @@ export function TimelineScreen() {
   const [scenes, setScenes] = useState<StoredScene[] | null>(null);
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const audioRef = useRef<Blob | null>(null);
   const videoInput = useRef<HTMLInputElement | null>(null);
+  const musicInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     listProjects().then((list) => {
@@ -49,8 +52,10 @@ export function TimelineScreen() {
     }
     let cancelled = false;
     let urls: string[] = [];
+    let audioObjUrl: string | null = null;
     setScenes(null);
     setTimeline(null);
+    setAudioUrl(null);
     audioRef.current = null;
 
     (async () => {
@@ -69,15 +74,21 @@ export function TimelineScreen() {
         if (blob) map[scene.id] = URL.createObjectURL(blob);
       }
 
-      // Seed from the storyboard, then re-attach user-added videos from the saved timeline.
+      // The timeline is the source of truth once it exists — load it and keep the user's edits.
+      // Only seed from the storyboard the first time (no saved timeline yet).
       const audio = await getGalleryAudio(list[0].clipId);
-      const duration = audio ? await audioDuration(audio) : 0;
-      const seeded = seedTimelineFromScenes(projectId, list, duration);
-      const merged = mergeVideoTracks(seeded, await getTimeline(projectId));
-      await saveTimeline(merged);
+      const saved = await getTimeline(projectId);
+      let tl: Timeline;
+      if (saved && saved.tracks.some((t) => t.type === 'photo' || t.type === 'video')) {
+        tl = saved;
+      } else {
+        const duration = audio ? await audioDuration(audio) : 0;
+        tl = seedTimelineFromScenes(projectId, list, duration);
+        await saveTimeline(tl);
+      }
 
       // Poster frames for the video lane.
-      for (const asset of merged.assets) {
+      for (const asset of tl.assets) {
         if (asset.type !== 'video') continue;
         const blob = await getAsset(asset.id);
         if (!blob) continue;
@@ -91,15 +102,19 @@ export function TimelineScreen() {
       }
       urls = Object.values(map);
       audioRef.current = audio;
+      audioObjUrl = audio ? URL.createObjectURL(audio) : null;
       setImageUrls(map);
+      setAudioUrl(audioObjUrl);
       setScenes(list);
-      setTimeline(merged);
+      setTimeline(tl);
     })();
 
     return () => {
       cancelled = true;
       urls.forEach((u) => URL.revokeObjectURL(u));
+      if (audioObjUrl) URL.revokeObjectURL(audioObjUrl);
       setImageUrls({});
+      setAudioUrl(null);
     };
   }, [projectId]);
 
@@ -140,6 +155,52 @@ export function TimelineScreen() {
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not add video.', 'error');
     }
+  };
+
+  const addMusicFile = () => musicInput.current?.click();
+
+  const onMusicFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !timeline || !projectId) return;
+    try {
+      const dur = await audioDuration(file);
+      if (dur <= 0) {
+        toast('Could not read that audio file.', 'error');
+        return;
+      }
+      const assetId = `aud-${Date.now()}`;
+      await saveAsset({ id: assetId, projectId, type: 'audio', blob: file, duration: dur });
+      const next = addMusic(timeline, assetId, dur, { volume: 0.3 });
+      await saveTimeline(next);
+      setTimeline(next);
+      toast(`Music added — ${dur.toFixed(1)}s. Select it on the timeline to set volume/fades.`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not add music.', 'error');
+    }
+  };
+
+  // Persist every edit — the timeline is the source of truth (see the load effect above).
+  const commit = (next: Timeline) => {
+    setTimeline(next);
+    void saveTimeline(next);
+  };
+
+  const resync = async () => {
+    if (!projectId || !scenes?.length || !timeline) return;
+    if (
+      !window.confirm(
+        'Re-sync rebuilds the photo, caption, and audio tracks from the current storyboard and discards manual edits to them (reorder / trim / split / delete). Videos you added are kept. Continue?',
+      )
+    )
+      return;
+    const audio = audioRef.current ?? (await getGalleryAudio(scenes[0].clipId));
+    const duration = audio ? await audioDuration(audio) : 0;
+    const seeded = seedTimelineFromScenes(projectId, scenes, duration);
+    const merged = mergeAddedMedia(seeded, timeline);
+    await saveTimeline(merged);
+    setTimeline(merged);
+    toast('Timeline re-synced from storyboard.');
   };
 
   const exportVideo = async () => {
@@ -200,8 +261,14 @@ export function TimelineScreen() {
         <div className="chip-row-spacer" />
         {ready && (
           <>
+            <button className="chip" onClick={resync}>
+              🔄 Re-sync
+            </button>
             <button className="chip" onClick={addVideo}>
               🎬 Add video
+            </button>
+            <button className="chip" onClick={addMusicFile}>
+              🎵 Add music
             </button>
             <button className="chip" disabled={exporting} onClick={exportVideo}>
               {exporting ? 'Rendering…' : '⬇ Export mp4'}
@@ -223,11 +290,16 @@ export function TimelineScreen() {
           {voiceClip && (
             <div className="vtag sb-meta">
               Seeded from <strong>{clipTitle(voiceClip)}</strong> · {timeline.outputWidth}×
-              {timeline.outputHeight} @ {timeline.fps}fps · add a video clip (appended after the
-              scenes) or export — read-only preview, editing coming next
+              {timeline.outputHeight} @ {timeline.fps}fps · reorder / trim / split / delete clips,
+              add video, then export
             </div>
           )}
-          <TimelineView timeline={timeline} imageUrls={imageUrls} />
+          <TimelineEditor
+            timeline={timeline}
+            imageUrls={imageUrls}
+            audioUrl={audioUrl}
+            onChange={commit}
+          />
         </>
       ) : (
         <div className="spinner" />
@@ -239,6 +311,13 @@ export function TimelineScreen() {
         accept="video/*"
         style={{ display: 'none' }}
         onChange={onVideoFile}
+      />
+      <input
+        ref={musicInput}
+        type="file"
+        accept="audio/*"
+        style={{ display: 'none' }}
+        onChange={onMusicFile}
       />
     </>
   );

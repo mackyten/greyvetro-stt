@@ -240,6 +240,43 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        6s@30 (180 frames), photo span still / video span motion (frame-diffed);
        photo-only path byte-identical. Deferred: frame-accurate `<video>` scrub
        preview, per-clip trim UI, video audio mixing.
+     - ✅ **TL Phase 2 — Interactive editing** (shipped 2026-07-18): the Timeline
+       tab is now an editor (`TimelineEditor.tsx`), not a read-only view. Per-clip
+       **select**, **drag-to-reorder** (HTML5 DnD, within a lane), **trim** both
+       edges (pointer handles — stills change `duration`; video also moves
+       `inPoint`/`outPoint`, clamped to the asset length), **split at playhead**
+       (`S`), **delete** (`Del`, guarded from removing the last visual clip), a
+       click-to-scrub **playhead**, and **Play/Pause** playback (a rAF clock
+       drives the playhead + synced voiceover; the live frame+caption **preview**
+       swaps stills as it plays, video shows its poster). Pure ops
+       (`reanchor`/`moveClip`/`trimClip`/`splitClip`/`deleteClip` in
+       `timelineOps.ts`) keep the base `concat` contiguous and re-derive the
+       display-only caption lane by source id. **The saved timeline is now the
+       source of truth** (loaded as-is; storyboard only seeds it once); a **🔄
+       Re-sync** action rebuilds photo/caption/audio from the current storyboard,
+       keeping added videos. No backend change — the compiler already ordered by
+       `startTime` and honored `duration`/`inPoint`/`outPoint`; new xUnit test
+       locks that a split (two clips, one source) emits an input per clip.
+       Captions still fused (overlay split is Phase 3). Verified: backend 12/12,
+       `tsc -b && vite build` clean, 20/20 pure-ops assertions.
+     - ✅ **TL Phase 4 — Multi-track audio** (shipped 2026-07-18, ahead of Phase 3
+       per the "light editing" priority): background **music/SFX** with per-track
+       **volume**/**mute** and per-clip **fade in/out**. `FilterGraphCompiler`
+       grew a mix path — each unmuted audio clip is an input-seek-trimmed input
+       with `volume` (clip × track gain), `afade` in/out, and `adelay` placement,
+       then `amix=inputs=N:normalize=0` + `apad` so `-shortest` keeps the **visual
+       length as master**. The single plain-voiceover case stays on the legacy
+       direct-map path (byte-for-similar; muting the only extra track falls back
+       to it). Web: **🎵 Add music** on the Timeline tab (blob in `timelineAssets`,
+       clip clamped to timeline length at 0.3 gain); music clips are selectable
+       with an inspector (track volume/mute, fade in/out, remove). Pure ops
+       `addMusic`/`setTrackAudio`/`setClipFade`/`removeTrack` + `trimClip` extended
+       to audio; `mergeVideoTracks` → `mergeAddedMedia` so music survives re-sync.
+       Verified: backend 15/15, build/lint clean, 16/16 audio-ops assertions, and
+       the exact `volume,afade,adelay,amix,apad` graph rendered by ffmpeg
+       end-to-end (h264+aac, 9.0s master length). Remaining: Phase 3 (crop/scale/
+       transform + caption alpha-overlay split), Phase 5 (Ken Burns), Phase 6
+       (transitions).
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), Ken

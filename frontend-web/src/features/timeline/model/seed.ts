@@ -39,8 +39,11 @@ export function seedTimelineFromScenes(
       outPoint: duration,
     });
     captionClips.push({
+      // Caption clips mirror their photo clip and carry the scene id as sourceId so edits
+      // (reorder/trim/split) can re-derive the caption lane by source. Captions stay fused into
+      // the photo frames at export (the caption track is display-only until the Phase 3 overlay).
       id: `caption-${scene.id}`,
-      sourceId: '',
+      sourceId: scene.id,
       startTime,
       duration,
       inPoint: 0,

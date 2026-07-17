@@ -38,5 +38,12 @@ export async function exportTimelineVideo(
     if (blob) assets[asset.id] = blob;
   }
 
+  // Music/SFX the user added (the voiceover is already packed above under its own id).
+  for (const asset of timeline.assets) {
+    if (asset.type !== 'audio' || asset.id === VOICEOVER_ASSET_ID) continue;
+    const blob = await getAsset(asset.id);
+    if (blob) assets[asset.id] = blob;
+  }
+
   return renderTimeline(timeline, assets);
 }

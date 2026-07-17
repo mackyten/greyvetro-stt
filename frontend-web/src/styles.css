@@ -1299,13 +1299,95 @@ input[type='range'] {
   }
 }
 
-/* ── Timeline editor (read-only, Phase 1) ─────────────────────────────── */
+/* ── Timeline editor (Phase 2 — interactive) ──────────────────────────── */
 .tl {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 16px 16px 20px;
   overflow-x: auto;
+}
+
+/* Header: live frame preview + edit tools. */
+.tl-head {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+
+.tl-preview {
+  position: relative;
+  flex: 0 0 auto;
+  width: 116px;
+  aspect-ratio: 9 / 16;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #12151a;
+  border: 1px solid var(--border);
+}
+.tl-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tl-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 32px;
+}
+.tl-preview-caption {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 10px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.tl-tools {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-width: 220px;
+}
+.tl-tools-row {
+  display: flex;
+  gap: 8px;
+}
+.tl-tools-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.tl-tools-hint {
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 420px;
+  line-height: 1.4;
+}
+
+/* Playhead line drawn in the ruler and every lane track. */
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--pink-deep);
+  pointer-events: none;
+  z-index: 4;
+}
+.tl-ruler {
+  cursor: pointer;
 }
 
 .tl-ruler {
@@ -1413,4 +1495,74 @@ input[type='range'] {
 .tl-clip-caption .tl-clip-label {
   color: var(--text);
   text-shadow: none;
+}
+
+/* Interactive clips. */
+.tl-clip.editable {
+  cursor: grab;
+}
+.tl-clip.editable:active {
+  cursor: grabbing;
+}
+.tl-clip.selected {
+  outline: 2px solid var(--blue-deep);
+  outline-offset: 1px;
+  z-index: 3;
+}
+.tl-clip.drop-target {
+  box-shadow: inset 4px 0 0 0 var(--blue-deep);
+}
+
+/* Trim grips on the selected clip's edges. */
+.tl-trim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  z-index: 2;
+  cursor: ew-resize;
+  background: linear-gradient(var(--blue-deep), var(--blue-deep)) center / 3px 40% no-repeat;
+  background-color: rgba(255, 255, 255, 0.25);
+  touch-action: none;
+}
+.tl-trim-start {
+  left: 0;
+  border-radius: 7px 0 0 7px;
+}
+.tl-trim-end {
+  right: 0;
+  border-radius: 0 7px 7px 0;
+}
+
+/* Music clip (distinct from the voiceover gradient). */
+.tl-clip-music {
+  background: #6c86d6;
+}
+
+/* Audio inspector shown when a music clip is selected. */
+.tl-audio-inspector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 440px;
+}
+.tl-audio-inspector label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tl-audio-inspector input[type='range'] {
+  width: 92px;
+}
+.tl-audio-inspector input[type='number'] {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
 }

@@ -47,13 +47,10 @@ public class FilterGraphCompiler
         if (visualClips.Count == 0)
             throw new ArgumentException("The base visual track has no clips.");
 
-        // First audio track = the voiceover. Phase 1 muxes exactly one audio stream.
-        var audioTrack = timeline.Tracks.FirstOrDefault(t => t.Type == TrackType.Audio)
-            ?? throw new ArgumentException("The timeline has no audio track.");
-        var audioClip = audioTrack.Clips.OrderBy(c => c.StartTime).FirstOrDefault()
-            ?? throw new ArgumentException("The audio track has no clips.");
-        if (!assetPaths.TryGetValue(audioClip.SourceId, out var audioPath))
-            throw new ArgumentException("The audio clip's source asset was not supplied.");
+        // Require an audio track up front (clear early error); the audio graph itself is built
+        // after the visual concat so it can use the visual input count for stream indices.
+        if (timeline.Tracks.All(t => t.Type != TrackType.Audio))
+            throw new ArgumentException("The timeline has no audio track.");
 
         var inputs = new List<string> { "-y" };
         var filters = new StringBuilder();
@@ -91,17 +88,72 @@ public class FilterGraphCompiler
         filters.Append(string.Concat(Enumerable.Range(0, visualClips.Count).Select(i => $"[v{i}]")))
             .Append($"concat=n={visualClips.Count}:v=1:a=0[vout]");
 
-        // The audio input follows all visual inputs, so its input index is the visual count.
-        var audioIndex = visualClips.Count;
-        inputs.AddRange(["-i", audioPath]);
+        // --- Audio ---
+        // Every unmuted audio clip with a supplied source becomes an input (input-seek trimmed),
+        // placed on the timeline with adelay, given per-clip/-track volume and fades, then amix'd.
+        var audioParts = timeline.Tracks
+            .Where(t => t.Type == TrackType.Audio && !t.Muted)
+            .SelectMany(t => t.Clips.Select(c => (Clip: c, TrackVolume: t.Volume)))
+            .Where(p => assetPaths.ContainsKey(p.Clip.SourceId))
+            .OrderBy(p => p.Clip.StartTime)
+            .ToList();
+        if (audioParts.Count == 0)
+            throw new ArgumentException("The audio track has no (supplied, unmuted) clips.");
 
-        // With video present the visual track can outrun the voiceover, so pad the voiceover with
-        // silence (apad) and let -shortest stop at the visual concat. Without video we keep the
-        // legacy behavior exactly (map the audio stream directly; -shortest == voiceover length),
-        // which preserves the byte-for-similar Phase-1 regression.
-        var audioMap = hasVideo ? "[aout]" : $"{audioIndex}:a";
-        if (hasVideo)
-            filters.Append($";[{audioIndex}:a]apad[aout]");
+        string audioMap;
+        var first = audioParts[0].Clip;
+        var isSimpleVoiceover = audioParts.Count == 1
+            && first.StartTime == 0 && first.InPoint == 0
+            && first.Volume is null && first.FadeIn is null && first.FadeOut is null
+            && audioParts[0].TrackVolume is null;
+
+        if (isSimpleVoiceover)
+        {
+            // Legacy path: map the single voiceover stream directly (apad only when video can outrun
+            // it, so -shortest stops at the visual concat). Byte-for-similar with the pre-audio phases.
+            var audioIndex = visualClips.Count;
+            inputs.AddRange(["-i", assetPaths[first.SourceId]]);
+            audioMap = hasVideo ? "[aout]" : $"{audioIndex}:a";
+            if (hasVideo)
+                filters.Append($";[{audioIndex}:a]apad[aout]");
+        }
+        else
+        {
+            // Mix path: apad the mix so -shortest always stops at the visual length (the master).
+            var audio = new StringBuilder();
+            for (var k = 0; k < audioParts.Count; k++)
+            {
+                var (clip, trackVolume) = audioParts[k];
+                var idx = visualClips.Count + k;
+                inputs.AddRange(["-ss", FfmpegProcess.Fmt(clip.InPoint), "-t", FfmpegProcess.Fmt(clip.Duration),
+                    "-i", assetPaths[clip.SourceId]]);
+
+                var chain = new List<string>();
+                var volume = EffectiveVolume(clip.Volume, trackVolume);
+                if (volume is not null && Math.Abs(volume.Value - 1.0) > 1e-9)
+                    chain.Add($"volume={FfmpegProcess.Fmt(volume.Value)}");
+                if (clip.FadeIn is > 0)
+                    chain.Add($"afade=t=in:st=0:d={FfmpegProcess.Fmt(clip.FadeIn.Value)}");
+                if (clip.FadeOut is > 0)
+                    chain.Add($"afade=t=out:st={FfmpegProcess.Fmt(Math.Max(0, clip.Duration - clip.FadeOut.Value))}:d={FfmpegProcess.Fmt(clip.FadeOut.Value)}");
+                var delayMs = (long)Math.Round(clip.StartTime * 1000);
+                if (delayMs > 0)
+                    chain.Add($"adelay={delayMs}:all=1");
+                if (chain.Count == 0)
+                    chain.Add("anull");
+                audio.Append($";[{idx}:a]{string.Join(",", chain)}[a{k}]");
+            }
+
+            if (audioParts.Count == 1)
+                audio.Append(";[a0]apad[aout]");
+            else
+                audio.Append(';')
+                    .Append(string.Concat(Enumerable.Range(0, audioParts.Count).Select(k => $"[a{k}]")))
+                    .Append($"amix=inputs={audioParts.Count}:normalize=0:dropout_transition=0[amixed];[amixed]apad[aout]");
+
+            filters.Append(audio);
+            audioMap = "[aout]";
+        }
 
         var output = new List<string>
         {
@@ -118,4 +170,8 @@ public class FilterGraphCompiler
             OutputArgs = output,
         };
     }
+
+    /// <summary>Clip gain × track gain, or null when neither is set (unity — no filter emitted).</summary>
+    private static double? EffectiveVolume(double? clipVolume, double? trackVolume) =>
+        clipVolume is null && trackVolume is null ? null : (clipVolume ?? 1.0) * (trackVolume ?? 1.0);
 }
