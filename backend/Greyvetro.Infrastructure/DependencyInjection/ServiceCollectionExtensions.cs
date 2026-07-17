@@ -1,4 +1,5 @@
 using ElevenLabs;
+using Greyvetro.Application.Features.Render;
 using Greyvetro.Application.Features.Script;
 using Greyvetro.Application.Features.SpeechToText;
 using Greyvetro.Application.Features.TextToSpeech;
@@ -6,6 +7,7 @@ using Greyvetro.Application.Features.Usage;
 using Greyvetro.Application.Features.Voices;
 using Greyvetro.Domain.Interfaces;
 using Greyvetro.Infrastructure.ElevenLabs;
+using Greyvetro.Infrastructure.Ffmpeg;
 using Greyvetro.Infrastructure.Gemini;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -46,6 +48,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ILogger<GeminiService>>()));
         services.AddScoped<GenerateScriptHandler>();
         services.AddScoped<GenerateScenesHandler>();
+
+        // ffmpeg render (Greyvetro Studio Phase 4).
+        services.AddScoped<IVideoRenderService, FfmpegVideoRenderer>();
+        services.AddScoped<RenderVideoHandler>();
         return services;
     }
 }

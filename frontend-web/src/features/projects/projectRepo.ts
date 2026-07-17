@@ -1,4 +1,4 @@
-import { GALLERY_STORE, openDb, PROJECT_STORE, txDone } from '../../core/db';
+import { GALLERY_STORE, openDb, PROJECT_STORE, SCENE_STORE, txDone } from '../../core/db';
 import type { GalleryItem, Project } from '../../core/types';
 
 export async function listProjects(): Promise<Project[]> {
@@ -37,10 +37,10 @@ export async function renameProject(id: string, name: string): Promise<void> {
   db.close();
 }
 
-/** Delete a project; its clips are kept and moved to "Unsorted". */
+/** Delete a project; its clips are kept and moved to "Unsorted". Its storyboard scenes are removed. */
 export async function deleteProject(id: string): Promise<void> {
   const db = await openDb();
-  const tx = db.transaction([PROJECT_STORE, GALLERY_STORE], 'readwrite');
+  const tx = db.transaction([PROJECT_STORE, GALLERY_STORE, SCENE_STORE], 'readwrite');
   tx.objectStore(PROJECT_STORE).delete(id);
   const gallery = tx.objectStore(GALLERY_STORE);
   const req = gallery.getAll();
@@ -49,6 +49,13 @@ export async function deleteProject(id: string): Promise<void> {
       if (record.projectId === id) {
         gallery.put({ ...record, projectId: undefined });
       }
+    }
+  };
+  const scenes = tx.objectStore(SCENE_STORE);
+  const sceneReq = scenes.getAll();
+  sceneReq.onsuccess = () => {
+    for (const record of sceneReq.result as { id: string; projectId: string }[]) {
+      if (record.projectId === id) scenes.delete(record.id);
     }
   };
   await txDone(tx);

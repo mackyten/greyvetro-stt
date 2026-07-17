@@ -5,7 +5,9 @@
       "Read(//usr/local/bin/**)",
       "Read(//Users/MarkP/Developer/greyvetro-conversational-agent/**)",
       "Bash(dotnet --version)",
-      "Bash(flutter --version)"
+      "Bash(flutter --version)",
+      "Read(//Users/angelo/.nuget/packages/elevenlabs-dotnet/3.7.2/lib/**)",
+      "Read(//Users/angelo/.nuget/packages/elevenlabs-dotnet/3.7.2/**)"
     ],
     "deny": [
       "Read(./backend/Greyvetro.API/appsettings*.json)",

@@ -1,10 +1,11 @@
-/** Shared IndexedDB access for the gallery + projects stores. */
+/** Shared IndexedDB access for the gallery + projects + scenes stores. */
 
 const DB_NAME = 'greyvetro-tts';
-const VERSION = 2;
+const VERSION = 3;
 
 export const GALLERY_STORE = 'gallery';
 export const PROJECT_STORE = 'projects';
+export const SCENE_STORE = 'scenes';
 
 export function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -15,6 +16,8 @@ export function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(GALLERY_STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(PROJECT_STORE))
         db.createObjectStore(PROJECT_STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(SCENE_STORE))
+        db.createObjectStore(SCENE_STORE, { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

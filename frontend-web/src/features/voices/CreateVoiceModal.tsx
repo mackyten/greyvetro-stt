@@ -57,7 +57,10 @@ export function CreateVoiceModal({ onCreated, onClose }: Props) {
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    setSamples((s) => [...s, ...Array.from(list).map((file) => ({ file, source: 'upload' as const }))]);
+    // Snapshot NOW: the FileList is live and is emptied when the input's value is
+    // reset, which happens before React runs a functional setState updater.
+    const added = Array.from(list).map((file) => ({ file, source: 'upload' as const }));
+    setSamples((s) => [...s, ...added]);
   };
 
   const clone = async () => {
@@ -119,7 +122,7 @@ export function CreateVoiceModal({ onCreated, onClose }: Props) {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".m4a,.mp3,.wav,.flac,.ogg,.webm,.aac,audio/*"
+              accept=".m4a,.mp3,.wav,.flac,.ogg,.webm,.aac,.mp4,audio/*,video/mp4"
               multiple
               hidden
               onChange={(e) => {

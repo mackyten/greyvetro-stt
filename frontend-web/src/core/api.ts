@@ -86,6 +86,26 @@ export async function generateScenes(
   return (await res.json()).scenes;
 }
 
+export interface RenderScenePayload {
+  start: number;
+  end: number;
+  /** Fully composited 1080x1920 frame (see features/storyboard/composite.ts). */
+  image: Blob;
+}
+
+/** Assemble composited scene frames + voiceover into a vertical mp4 (server-side ffmpeg). */
+export async function renderVideo(audio: Blob, scenes: RenderScenePayload[]): Promise<Blob> {
+  const form = new FormData();
+  form.append('audio', audio, 'voiceover.mp3');
+  form.append(
+    'scenes',
+    JSON.stringify(scenes.map((s, i) => ({ start: s.start, end: s.end, imageIndex: i }))),
+  );
+  scenes.forEach((s, i) => form.append(`image-${i}`, s.image, `image-${i}.jpg`));
+  const res = await checkStatus(await fetch(`${BASE}/render`, { method: 'POST', body: form }));
+  return res.blob();
+}
+
 export async function cloneVoice(
   name: string,
   description: string,

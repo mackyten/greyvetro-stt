@@ -125,6 +125,15 @@ export interface Scene {
   imagePrompt: string;
 }
 
+/** A scene persisted on a project's storyboard (image blob lives in IndexedDB). */
+export interface StoredScene extends Scene {
+  id: string;
+  projectId: string;
+  clipId: string; // the gallery clip providing the voiceover
+  order: number;
+  hasImage: boolean;
+}
+
 export interface GalleryItem extends VoiceSettings {
   id: string;
   text: string;

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Greyvetro.Application.Features.Render;
 using Greyvetro.Application.Features.Script;
 using Greyvetro.Application.Features.SpeechToText;
 using Greyvetro.Application.Features.TextToSpeech;
@@ -120,6 +122,45 @@ app.MapPost("/script/scenes", async (GenerateScenesRequest req, GenerateScenesHa
     }
 });
 
+app.MapPost("/render", async (HttpRequest http, RenderVideoHandler handler, CancellationToken ct) =>
+{
+    var form = await http.ReadFormAsync(ct);
+    var audio = form.Files["audio"];
+    if (audio is null)
+        return Results.BadRequest("A voiceover audio file is required.");
+    var sceneDtos = JsonSerializer.Deserialize<List<RenderSceneDto>>(
+        form["scenes"].ToString(), JsonSerializerOptions.Web);
+    if (sceneDtos is null || sceneDtos.Count == 0)
+        return Results.BadRequest("At least one scene is required.");
+
+    using var audioMs = new MemoryStream();
+    await audio.OpenReadStream().CopyToAsync(audioMs, ct);
+
+    var scenes = new List<RenderScene>();
+    foreach (var dto in sceneDtos)
+    {
+        byte[]? image = null;
+        if (dto.ImageIndex is { } idx && form.Files[$"image-{idx}"] is { } file)
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream().CopyToAsync(ms, ct);
+            image = ms.ToArray();
+        }
+        scenes.Add(new RenderScene { Start = dto.Start, End = dto.End, Image = image });
+    }
+
+    var job = new RenderJob { Audio = audioMs.ToArray(), Scenes = scenes };
+    try
+    {
+        var mp4 = await handler.HandleAsync(new RenderVideoCommand(job), ct);
+        return Results.File(mp4, "video/mp4", "video.mp4");
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: 503);
+    }
+});
+
 app.MapPost("/voices/clone", async (HttpRequest http, CloneVoiceHandler handler, CancellationToken ct) =>
 {
     var form = await http.ReadFormAsync(ct);
@@ -135,3 +176,4 @@ app.Run();
 record GenerateSpeechRequest(string Text, string VoiceId, float Stability = 0.5f, float SimilarityBoost = 0.75f, float Style = 0f, bool UseSpeakerBoost = false, string ModelId = "eleven_multilingual_v2");
 record GenerateScriptRequest(string Topic, string? Instructions = null, int TargetSeconds = 60);
 record GenerateScenesRequest(Transcript Transcript, string? Instructions = null);
+record RenderSceneDto(double Start, double End, int? ImageIndex);

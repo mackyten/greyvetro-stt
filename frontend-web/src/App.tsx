@@ -4,20 +4,26 @@ import type { Draft, GalleryItem, Preset, Usage } from './core/types';
 import { useTheme } from './core/useTheme';
 import { GalleryScreen } from './features/gallery/GalleryScreen';
 import { PresetsScreen } from './features/presets/PresetsScreen';
+import { StoryboardScreen } from './features/storyboard/StoryboardScreen';
 import { Composer } from './features/tts/Composer';
 import { UsageCard } from './features/usage/UsageCard';
 
-type Tab = 'studio' | 'gallery' | 'presets';
+type Tab = 'studio' | 'gallery' | 'storyboard' | 'presets';
 
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'studio', icon: '🎙', label: 'Studio' },
   { id: 'gallery', icon: '🎧', label: 'Gallery' },
+  { id: 'storyboard', icon: '🎬', label: 'Storyboard' },
   { id: 'presets', icon: '🎚', label: 'Presets' },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   studio: { title: 'Studio', subtitle: 'Turn your script into speech with ElevenLabs voices.' },
   gallery: { title: 'Gallery', subtitle: 'Takes you chose to keep, saved locally in this browser.' },
+  storyboard: {
+    title: 'Storyboard',
+    subtitle: 'Turn a project’s voiceover into timed scenes with images, then preview the cut.',
+  },
   presets: { title: 'Presets', subtitle: 'Saved voice + settings bundles, ready to re-apply.' },
 };
 
@@ -91,6 +97,7 @@ export default function App() {
             onUseSettings={(item) => loadIntoComposer(item)}
           />
         )}
+        {tab === 'storyboard' && <StoryboardScreen />}
         {tab === 'presets' && <PresetsScreen onUse={(p) => loadIntoComposer(p)} />}
       </main>
     </div>

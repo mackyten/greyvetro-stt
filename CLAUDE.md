@@ -50,7 +50,7 @@ greyvetro-tts/
 - Transient confirmations use **snackbars** (`core/toast.tsx`: `ToastProvider` wraps `App` in `main.tsx`; call `useToast()(message, variant?)`, variants success/error/info, bottom-center, auto-dismiss ~3s) — never inline notice banners. Inline `error-banner` remains only for persistent contextual errors (e.g. generation failures next to the Generate button).
 - Full feature parity with the Flutter app: composer, voice picker, voice settings, playback/download, usage card, dark mode, **Gallery** (IndexedDB stores metadata + audio blobs per generation, browser-local), **Presets** (localStorage JSON index, same name-independent duplicate guard), and **Create-my-voice** (MediaRecorder recording or file upload → `/voices/clone`). Cross-screen flows ("Use these settings", "Edit & regenerate", preset "Use") pass a `Draft` object down from `App`; the composer stays mounted across tab switches so its state persists.
 - **Take workflow**: generating creates an in-memory unsaved take (`Take` in `Composer.tsx`) and opens the **Review take modal** (`features/tts/TakeReviewModal.tsx`) — nothing is persisted until the user clicks **Save to \<project\>** there (other options: Regenerate, Discard). Closing the modal keeps the take; a "Review take" pill in the rail reopens it. The gallery holds only saved takes.
-- **Projects** (web-only): clips group into projects for video work. Composer "Project" selector (`features/projects/ProjectSelect.tsx`, active id in localStorage) sets the save target; saved takes get an auto-title. Gallery chip row filters by project and offers inline clip rename, move-to-project, per-clip `<project>-<clip>.mp3` downloads, and a per-view zip export (`jszip`). Deleting a project moves its clips to Unsorted. IndexedDB is at **version 2** (`core/db.ts`: `gallery` + `projects` stores) — bump the version there when adding stores.
+- **Projects** (web-only): clips group into projects for video work. Composer "Project" selector (`features/projects/ProjectSelect.tsx`, active id in localStorage) sets the save target; saved takes get an auto-title. Gallery chip row filters by project and offers inline clip rename, move-to-project, per-clip `<project>-<clip>.mp3` downloads, and a per-view zip export (`jszip`). Deleting a project moves its clips to Unsorted (and deletes its storyboard scenes). IndexedDB is at **version 3** (`core/db.ts`: `gallery` + `projects` + `scenes` stores) — bump the version there when adding stores.
 
 ---
 
@@ -73,6 +73,10 @@ of any committed file.
 For AI script/scene generation (Greyvetro Studio Phase 2), also export
 `GEMINI_APIKEY` (free key from https://aistudio.google.com/apikey). Optional —
 `/script` endpoints return 503 with instructions until it is set.
+
+Video export (`POST /render`) needs **ffmpeg** on the backend machine:
+`brew install ffmpeg`. Optional — the endpoint returns 503 with the install
+hint until it is present.
 
 **Desktop frontend** (from `frontend/`):
 ```bash
@@ -169,8 +173,33 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
      composer "✨ Write with AI" chip (`features/script/ScriptAssistModal.tsx`)
      and a "🎬 Scene prompts" view in the TranscriptModal with per-scene
      copy-prompt buttons for Flow.
+   - ✅ **Phase 3 — Storyboard**: new **Storyboard** nav tab
+     (`features/storyboard/`): per-project storyboard generated from a chosen
+     voiceover clip (auto-transcribes via `/stt` when the clip has no
+     transcript, then `/script/scenes`). Scene cards with per-scene image
+     upload/replace, copy-prompt, drag-to-reorder (durations keep, start times
+     re-anchor), delete-with-gap-fill, regenerate; browser-side **preview**
+     swaps images on the voiceover timeline (`StoryboardPreview.tsx`).
+     IndexedDB is now **version 3** (`core/db.ts`: + `scenes` store;
+     `sceneRepo.ts` stores metadata + image blobs). `deleteProject` also
+     removes the project's scenes.
+   - ✅ **Phase 4 — Render**: Storyboard "⬇ Export mp4" → `POST /render`
+     (multipart: voiceover + scenes JSON + per-scene frame images) →
+     `Infrastructure/Ffmpeg/FfmpegVideoRenderer.cs` drives ffmpeg (looped
+     stills scaled/cropped to **1080×1920 30fps**, dark placeholder for
+     imageless scenes, concat + AAC audio, `-shortest`, faststart) → download
+     `<project>.mp4`. **Captions are burned in client-side**
+     (`features/storyboard/composite.ts`: canvas cover-fit + wrapped Manrope
+     caption box) — Homebrew's ffmpeg 8 has **no drawtext filter** (built
+     without freetype), so never rely on drawtext server-side. ffmpeg is a
+     backend runtime dependency (`brew install ffmpeg`; probed at
+     `/opt/homebrew/bin` → `/usr/local/bin` → PATH, 503 with install hint if
+     missing). Verified: 5-scene render → h264/aac 1080×1920@30, correct
+     cover-crop + placeholder frames.
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
-     (`greyvetro-studio` proposed); Phases 3–4 not started.
+     (`greyvetro-studio` proposed). Later/optional: Gemini image generation
+     (the key already has `gemini-3-pro-image` / nano-banana access), Ken
+     Burns zoom, clip trimming, transitions, Flutter parity.
 
 ### Candidate additions
 - ✅ **Voice settings** — "Voice settings" card in the composer: **Stability**, **Similarity**, **Style** sliders + a **Speaker boost** toggle (on by default — strongest lever for cloned-voice likeness). All four flow through `TtsRequest` → `VoiceSettings`, are stored per gallery item, and restored on edit/regenerate. (Flutter still hardcodes `eleven_multilingual_v2`; the **web** frontend has a Model dropdown — v2 / Eleven v3 / Turbo / Flash — carried through `/tts` `modelId`, gallery items, and presets.)
