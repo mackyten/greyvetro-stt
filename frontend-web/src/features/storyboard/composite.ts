@@ -1,20 +1,26 @@
+import { CAPTION_FONT_SPEC, drawCaption } from '../timeline/captions/drawCaption';
+
 /**
  * Client-side frame compositing for the mp4 export: each scene becomes a full
- * 1080x1920 JPEG with the image cover-fitted and the narration burned in as a
- * caption. Done in the browser (not ffmpeg drawtext) so captions use the app's
- * Manrope font and the backend needs no freetype support.
+ * 1080x1920 JPEG with the image cover-fitted and (optionally) the narration burned
+ * in as a caption. Done in the browser (not ffmpeg drawtext) so captions use the
+ * app's Manrope font and the backend needs no freetype support.
+ *
+ * Caption drawing is shared with the timeline caption-overlay rasterizer via
+ * `drawCaption` (docs/timeline-editor-plan.md §5). The storyboard path still fuses
+ * captions in (`captions: true`); the timeline path passes `false` and composites a
+ * separate alpha-PNG overlay track instead.
  */
 
 const W = 1080;
 const H = 1920;
-const CAPTION_FONT = '600 54px Manrope, sans-serif';
 
 export async function compositeFrame(
   image: Blob | null,
   narration: string,
   captions: boolean,
 ): Promise<Blob> {
-  await document.fonts.load(CAPTION_FONT).catch(() => {});
+  await document.fonts.load(CAPTION_FONT_SPEC).catch(() => {});
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -38,7 +44,7 @@ export async function compositeFrame(
     ctx.fillText('🎬', W / 2, H / 2);
   }
 
-  if (captions && narration.trim()) drawCaption(ctx, narration.trim());
+  if (captions && narration.trim()) drawCaption(ctx, narration.trim(), W, H);
 
   return new Promise((resolve, reject) =>
     canvas.toBlob(
@@ -47,40 +53,4 @@ export async function compositeFrame(
       0.92,
     ),
   );
-}
-
-function drawCaption(ctx: CanvasRenderingContext2D, text: string) {
-  ctx.font = CAPTION_FONT;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-
-  const maxWidth = W - 200;
-  const lines: string[] = [];
-  let line = '';
-  for (const word of text.split(/\s+/)) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (line && ctx.measureText(candidate).width > maxWidth) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
-    }
-  }
-  if (line) lines.push(line);
-
-  const lineHeight = 74;
-  const padX = 40;
-  const padY = 30;
-  const blockHeight = lines.length * lineHeight;
-  const bottom = H - 320;
-  const top = bottom - blockHeight;
-  const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
-
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.beginPath();
-  ctx.roundRect(W / 2 - widest / 2 - padX, top - padY, widest + padX * 2, blockHeight + padY * 2, 20);
-  ctx.fill();
-
-  ctx.fillStyle = '#FFFFFF';
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, top + (i + 0.78) * lineHeight));
 }

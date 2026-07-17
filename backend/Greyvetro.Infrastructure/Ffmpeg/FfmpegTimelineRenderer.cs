@@ -16,6 +16,7 @@ public class FfmpegTimelineRenderer(
     public async Task<byte[]> RenderAsync(
         Timeline timeline,
         IReadOnlyDictionary<string, byte[]> assets,
+        IReadOnlyDictionary<string, byte[]> captions,
         CancellationToken ct = default)
     {
         var ffmpeg = FfmpegProcess.Find()
@@ -50,7 +51,16 @@ public class FfmpegTimelineRenderer(
                 assetPaths[id] = path;
             }
 
-            var plan = compiler.Compile(timeline, assetPaths);
+            // Caption PNGs are transparent full-frame overlays keyed by caption clip id.
+            var captionPaths = new Dictionary<string, string>();
+            foreach (var (clipId, bytes) in captions)
+            {
+                var path = Path.Combine(dir, $"caption_{index++}.png");
+                await File.WriteAllBytesAsync(path, bytes, ct);
+                captionPaths[clipId] = path;
+            }
+
+            var plan = compiler.Compile(timeline, assetPaths, captionPaths);
 
             var filterPath = Path.Combine(dir, "filters.txt");
             await File.WriteAllTextAsync(filterPath, plan.FilterComplex, ct);

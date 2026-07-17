@@ -274,9 +274,28 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        to audio; `mergeVideoTracks` → `mergeAddedMedia` so music survives re-sync.
        Verified: backend 15/15, build/lint clean, 16/16 audio-ops assertions, and
        the exact `volume,afade,adelay,amix,apad` graph rendered by ffmpeg
-       end-to-end (h264+aac, 9.0s master length). Remaining: Phase 3 (crop/scale/
-       transform + caption alpha-overlay split), Phase 5 (Ken Burns), Phase 6
-       (transitions).
+       end-to-end (h264+aac, 9.0s master length).
+     - 🚧 **TL Phase 3 — Layering + transform** (in progress; sliced 3a→3b→3c):
+       - ✅ **3a — Caption alpha-overlay split** (2026-07-18): captions are no
+         longer fused into the photo frames. Each caption clip rasterizes to a
+         **transparent full-frame PNG** (`captions/drawCaption.ts`
+         `renderCaptionOverlay`, sharing the brand `drawCaption` extracted from
+         `storyboard/composite.ts`), ships as a `caption-<clipId>` multipart part,
+         and the compiler composites it as a **top `overlay=0:0:enable='between(t,
+         start,end)'`** layer. Caption inputs are appended **after** the audio
+         inputs so audio stream indices — and every golden test — are untouched;
+         with no caption PNGs the graph still maps `[vout]` unchanged. Photo frames
+         now export caption-free (`compositeFrame(…, false)`). Verified end-to-end
+         via a real `/render` POST: h264/aac 1080×1920 4s, caption box present at
+         t=1 and absent at t=3 (frame-sampled). Backend 18/18, `tsc -b && vite
+         build` clean. **This unblocks transforms** — the image can now move
+         independently of the text.
+       - **3b — Per-clip transform** (crop/scale/position/rotation + inspector):
+         not started.
+       - **3c — Layering** (2nd visual track + z-index via chained `overlay`):
+         not started.
+     - Remaining after Phase 3: Phase 5 (Ken Burns `zoompan`), Phase 6
+       (transitions `xfade`/`acrossfade`).
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), Ken

@@ -423,4 +423,102 @@ public class FilterGraphCompilerTests
         Assert.DoesNotContain("[aout]", plan.OutputArgs);
         Assert.Contains("1:a", plan.OutputArgs); // voiceover mapped directly (audio input index 1)
     }
+
+    // --- Captions as alpha-PNG overlays (Phase 3) ---
+
+    /// <summary>The legacy photo+audio case plus a caption track mirroring the first two clips.</summary>
+    private static (Timeline, Dictionary<string, string>) CaptionCase()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        timeline = timeline with
+        {
+            Tracks =
+            [
+                .. timeline.Tracks,
+                new Track
+                {
+                    Id = "caption", Type = TrackType.Caption, ZIndex = 1,
+                    Clips =
+                    [
+                        new Clip { Id = "cap0", SourceId = "img-0", StartTime = 0,   Duration = 2.5, Text = "one" },
+                        new Clip { Id = "cap1", SourceId = "img-1", StartTime = 2.5, Duration = 3.5, Text = "two" },
+                    ],
+                },
+            ],
+        };
+        return (timeline, paths);
+    }
+
+    [Fact]
+    public void Compile_WithCaptionPngs_OverlaysEachGatedToItsWindow_AndMapsVcap()
+    {
+        var (timeline, paths) = CaptionCase();
+        var captionPaths = new Dictionary<string, string>
+        {
+            ["cap0"] = "/tmp/cap0.png",
+            ["cap1"] = "/tmp/cap1.png",
+        };
+
+        var plan = _compiler.Compile(timeline, paths, captionPaths);
+
+        // One image input per caption, appended AFTER the voiceover input (index 3).
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "2.5", "-i", "/tmp/a.jpg",
+                "-loop", "1", "-t", "3.5", "-i", "/tmp/b.jpg",
+                "-loop", "1", "-t", "4.5", "-i", "/tmp/c.jpg",
+                "-i", "/tmp/voice.mp3",
+                "-i", "/tmp/cap0.png",
+                "-i", "/tmp/cap1.png",
+            },
+            plan.InputArgs);
+
+        // Overlays chain onto the concat output, each gated to its clip's [start,end] window.
+        Assert.Contains("[vout][4:v]overlay=0:0:enable='between(t,0,2.5)'[vc0]", Norm(plan.FilterComplex));
+        Assert.Contains("[vc0][5:v]overlay=0:0:enable='between(t,2.5,6)'[vcap]", Norm(plan.FilterComplex));
+
+        // The final overlay label is what gets mapped (not the raw concat output).
+        var maps = plan.OutputArgs.ToList();
+        Assert.Equal("[vcap]", maps[maps.IndexOf("-map") + 1]);
+    }
+
+    [Fact]
+    public void Compile_CaptionInputsComeAfterMixedAudio_LeavingAudioIndicesIntact()
+    {
+        // With a real audio mix (voiceover + music = inputs 1,2), caption PNGs must index after
+        // them (3,4) so the amix stream references above stay valid.
+        var (timeline, paths) = VoiceoverPlusMusicCase();
+        timeline = timeline with
+        {
+            Tracks =
+            [
+                .. timeline.Tracks,
+                new Track
+                {
+                    Id = "caption", Type = TrackType.Caption, ZIndex = 2,
+                    Clips = [new Clip { Id = "cap0", SourceId = "img", StartTime = 1, Duration = 4, Text = "hi" }],
+                },
+            ],
+        };
+        var captionPaths = new Dictionary<string, string> { ["cap0"] = "/tmp/cap0.png" };
+
+        var plan = _compiler.Compile(timeline, paths, captionPaths);
+
+        Assert.Contains("amix=inputs=2", Norm(plan.FilterComplex));       // audio mix intact
+        Assert.Contains("[vout][3:v]overlay=0:0:enable='between(t,1,5)'[vcap]", Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_CaptionTrackButNoPngs_IsIgnored_MapsVout()
+    {
+        // A display-only caption track with no supplied PNGs stays out of the graph (legacy path).
+        var (timeline, paths) = CaptionCase();
+
+        var plan = _compiler.Compile(timeline, paths); // no captionPaths
+
+        Assert.DoesNotContain("overlay", Norm(plan.FilterComplex));
+        Assert.Contains("[vout]", plan.OutputArgs);
+    }
 }

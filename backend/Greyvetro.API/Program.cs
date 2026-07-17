@@ -149,17 +149,26 @@ app.MapPost("/render", async (
             return Results.BadRequest("A timeline with at least one track is required.");
 
         var assets = new Dictionary<string, byte[]>();
+        var captions = new Dictionary<string, byte[]>();
         foreach (var file in form.Files)
         {
-            if (!file.Name.StartsWith("asset-", StringComparison.Ordinal)) continue;
             using var ms = new MemoryStream();
-            await file.OpenReadStream().CopyToAsync(ms, ct);
-            assets[file.Name["asset-".Length..]] = ms.ToArray();
+            if (file.Name.StartsWith("asset-", StringComparison.Ordinal))
+            {
+                await file.OpenReadStream().CopyToAsync(ms, ct);
+                assets[file.Name["asset-".Length..]] = ms.ToArray();
+            }
+            else if (file.Name.StartsWith("caption-", StringComparison.Ordinal))
+            {
+                // Pre-rendered transparent caption PNG, keyed by caption clip id.
+                await file.OpenReadStream().CopyToAsync(ms, ct);
+                captions[file.Name["caption-".Length..]] = ms.ToArray();
+            }
         }
 
         try
         {
-            var mp4 = await timelineHandler.HandleAsync(new RenderTimelineCommand(timeline, assets), ct);
+            var mp4 = await timelineHandler.HandleAsync(new RenderTimelineCommand(timeline, assets, captions), ct);
             return Results.File(mp4, "video/mp4", "video.mp4");
         }
         catch (ArgumentException ex)

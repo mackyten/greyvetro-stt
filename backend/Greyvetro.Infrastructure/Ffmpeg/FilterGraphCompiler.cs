@@ -20,7 +20,13 @@ public class FilterGraphCompiler
     /// <param name="timeline">The document to compile.</param>
     /// <param name="assetPaths">Resolved file path per <see cref="MediaAsset.Id"/>. A visual
     /// clip whose source is absent here renders a placeholder card.</param>
-    public FfmpegPlan Compile(Timeline timeline, IReadOnlyDictionary<string, string> assetPaths)
+    /// <param name="captionPaths">Resolved file path per caption <see cref="Clip.Id"/> — a
+    /// pre-rendered transparent full-frame PNG. Each is overlaid on top of the base video, gated
+    /// to its clip window. Null/empty keeps captions out of the graph (legacy fused-caption path).</param>
+    public FfmpegPlan Compile(
+        Timeline timeline,
+        IReadOnlyDictionary<string, string> assetPaths,
+        IReadOnlyDictionary<string, string>? captionPaths = null)
     {
         var w = timeline.OutputWidth;
         var h = timeline.OutputHeight;
@@ -101,6 +107,7 @@ public class FilterGraphCompiler
             throw new ArgumentException("The audio track has no (supplied, unmuted) clips.");
 
         string audioMap;
+        int audioInputCount;
         var first = audioParts[0].Clip;
         var isSimpleVoiceover = audioParts.Count == 1
             && first.StartTime == 0 && first.InPoint == 0
@@ -116,6 +123,7 @@ public class FilterGraphCompiler
             audioMap = hasVideo ? "[aout]" : $"{audioIndex}:a";
             if (hasVideo)
                 filters.Append($";[{audioIndex}:a]apad[aout]");
+            audioInputCount = 1;
         }
         else
         {
@@ -153,11 +161,46 @@ public class FilterGraphCompiler
 
             filters.Append(audio);
             audioMap = "[aout]";
+            audioInputCount = audioParts.Count;
+        }
+
+        // --- Captions (Phase 3: alpha-PNG overlay track) ---
+        // Each caption clip with a supplied transparent PNG becomes a top overlay on the base
+        // video, gated to its [startTime, startTime+duration] window. The PNGs are browser-rendered
+        // (brand font) and only composited here — the backend has no drawtext/freetype
+        // (docs/timeline-editor-plan.md §5). Caption inputs come after the audio inputs so the
+        // audio stream indices above are untouched; with none, the graph is the legacy one.
+        var videoMap = "[vout]";
+        if (captionPaths is { Count: > 0 })
+        {
+            var captionClips = timeline.Tracks
+                .Where(t => t.Type == TrackType.Caption)
+                .SelectMany(t => t.Clips)
+                .Where(c => captionPaths.ContainsKey(c.Id))
+                .OrderBy(c => c.StartTime)
+                .ToList();
+
+            var prev = "[vout]";
+            for (var j = 0; j < captionClips.Count; j++)
+            {
+                var clip = captionClips[j];
+                var idx = visualClips.Count + audioInputCount + j;
+                inputs.AddRange(["-i", captionPaths[clip.Id]]);
+
+                var start = FfmpegProcess.Fmt(clip.StartTime);
+                var end = FfmpegProcess.Fmt(clip.StartTime + clip.Duration);
+                var outLabel = j == captionClips.Count - 1 ? "[vcap]" : $"[vc{j}]";
+                filters.Append($";{prev}[{idx}:v]overlay=0:0:enable='between(t,{start},{end})'{outLabel}");
+                prev = outLabel;
+            }
+
+            if (captionClips.Count > 0)
+                videoMap = "[vcap]";
         }
 
         var output = new List<string>
         {
-            "-map", "[vout]", "-map", audioMap,
+            "-map", videoMap, "-map", audioMap,
             "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             "-shortest", "-movflags", "+faststart",

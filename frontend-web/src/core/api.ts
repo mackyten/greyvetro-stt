@@ -109,16 +109,20 @@ export async function renderVideo(audio: Blob, scenes: RenderScenePayload[]): Pr
 
 /**
  * Render a timeline document to a vertical mp4 (Greyvetro Studio Phase 5). The structured
- * Timeline DTO goes as JSON; each referenced asset blob rides along as `asset-<sourceId>`.
+ * Timeline DTO goes as JSON; each referenced asset blob rides along as `asset-<sourceId>`, and
+ * each pre-rendered transparent caption PNG as `caption-<clipId>` (the alpha-overlay track, §5).
  * No ffmpeg syntax ever crosses the wire — the backend compiles the filter graph.
  */
 export async function renderTimeline(
   timeline: TimelineDoc,
   assets: Record<string, Blob>,
+  captions: Record<string, Blob> = {},
 ): Promise<Blob> {
   const form = new FormData();
   form.append('timeline', JSON.stringify(timeline));
   for (const [id, blob] of Object.entries(assets)) form.append(`asset-${id}`, blob, `asset-${id}`);
+  for (const [clipId, blob] of Object.entries(captions))
+    form.append(`caption-${clipId}`, blob, `caption-${clipId}.png`);
   const res = await checkStatus(await fetch(`${BASE}/render`, { method: 'POST', body: form }));
   return res.blob();
 }

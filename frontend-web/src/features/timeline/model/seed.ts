@@ -11,9 +11,9 @@ export const VOICEOVER_ASSET_ID = 'voiceover';
  *
  * Segment placement reproduces the legacy scene renderer exactly — the first clip is pulled
  * back to 0 and the last is padded 1.5s (trailing silence, trimmed by ffmpeg's -shortest) —
- * so a seeded timeline renders byte-for-similar to today's storyboard export. In Phase 1
- * captions stay fused into the photo frames at export, so the caption track is for the
- * read-only view only; it splits into its own overlay in Phase 3.
+ * so a seeded timeline renders byte-for-similar to today's storyboard export. Since TL Phase 3a
+ * the caption track is a real export layer: each caption clip rasterizes to a transparent PNG
+ * the backend composites via `overlay` (docs/timeline-editor-plan.md §5), not fused into frames.
  */
 export function seedTimelineFromScenes(
   projectId: string,
@@ -40,8 +40,8 @@ export function seedTimelineFromScenes(
     });
     captionClips.push({
       // Caption clips mirror their photo clip and carry the scene id as sourceId so edits
-      // (reorder/trim/split) can re-derive the caption lane by source. Captions stay fused into
-      // the photo frames at export (the caption track is display-only until the Phase 3 overlay).
+      // (reorder/trim/split) can re-derive the caption lane by source. At export each caption clip
+      // rasterizes to a transparent PNG the backend overlays on its [startTime, end] window.
       id: `caption-${scene.id}`,
       sourceId: scene.id,
       startTime,

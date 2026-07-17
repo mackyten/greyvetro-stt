@@ -381,10 +381,26 @@ storyboard.
   new xUnit test locks that a split (two clips over one source) emits an input
   per clip. Captions stay fused this phase (overlay split is Phase 3). Verified:
   backend 12/12, `tsc -b && vite build` clean, 20/20 pure-ops assertions.
-- **Phase 3 — Layering + transform (captions split here).** Add/remove tracks,
+- 🚧 **Phase 3 — Layering + transform (captions split here).** Add/remove tracks,
   z-index layering in preview + compiler, crop/position/scale on the selected
   clip. **Captions move to their own alpha-overlay track now** (§5), because
-  images start transforming independently.
+  images start transforming independently. Being built in three slices:
+  - ✅ **3a — Caption alpha-overlay split (shipped 2026-07-18).** `drawCaption` was
+    extracted from `storyboard/composite.ts` into a shared `captions/drawCaption.ts`
+    (with `renderCaptionOverlay`, which rasterizes a caption clip to a transparent
+    full-output PNG). The timeline export now composites photo frames *without*
+    captions and ships each caption clip as a `caption-<clipId>` part; the C#
+    `FilterGraphCompiler` gained a `captionPaths` argument and composites each as a
+    top `overlay=0:0:enable='between(t,start,end)'` layer, its inputs appended after
+    the audio inputs so the audio stream indices (and all golden-string tests) stay
+    intact — with no caption PNGs it maps `[vout]` exactly as before. Verified with
+    a real `/render` POST (h264/aac 1080×1920, caption box present at t=1, absent at
+    t=3, frame-sampled). Backend 18/18, `tsc -b && vite build` clean. Unblocks 3b.
+  - **3b — Per-clip transform.** crop/position/scale/rotation on the selected clip
+    (normalized 0–1 → `crop`/`scale`/`overlay` in the compiler) + an inspector +
+    preview. Not started.
+  - **3c — Layering.** Add/remove tracks, a 2nd visual track, z-index ordering via
+    chained `overlay` in preview + compiler. Not started.
 - ✅ **Phase 4 — Audio (shipped 2026-07-18, ahead of Phase 3 per the "light
   editing" priority).** Multiple audio tracks (voiceover + music/SFX), per-track
   volume/mute, fade in/out. The compiler grew a mix path: each unmuted audio clip

@@ -1,5 +1,6 @@
 import { renderTimeline } from '../../../core/api';
 import type { StoredScene } from '../../../core/types';
+import { renderCaptionOverlay } from '../captions/drawCaption';
 import { compositeFrame } from '../../storyboard/composite';
 import { getSceneImage } from '../../storyboard/sceneRepo';
 import { VOICEOVER_ASSET_ID } from '../model/seed';
@@ -7,13 +8,14 @@ import type { Timeline } from '../model/types';
 import { getAsset } from '../timelineAssetRepo';
 
 /**
- * Render a seeded timeline to an mp4 (Greyvetro Studio Phase 5, Phase-1 scope).
+ * Render a seeded timeline to an mp4 (Greyvetro Studio Phase 5).
  *
- * Each photo clip's sourceId is a storyboard scene id, so we composite that scene's image +
- * narration into a full-frame image (captions stay burned in this phase — see
- * docs/timeline-editor-plan.md §5) and pack the voiceover under its stable asset id. The
- * structured timeline + these asset blobs POST to /render, where the backend compiler builds
- * the ffmpeg graph.
+ * Each photo clip's sourceId is a storyboard scene id, so we composite that scene's image into a
+ * full-frame image *without* captions. From TL Phase 3 on, captions are their own alpha-overlay
+ * track (docs/timeline-editor-plan.md §5): each caption clip rasterizes to a transparent PNG the
+ * backend composites via `overlay`, so the underlying image can later crop/scale independently.
+ * The voiceover packs under its stable asset id; the structured timeline + these blobs POST to
+ * /render, where the backend compiler builds the ffmpeg graph.
  */
 export async function exportTimelineVideo(
   timeline: Timeline,
@@ -28,7 +30,20 @@ export async function exportTimelineVideo(
     const scene = byId.get(clip.sourceId);
     if (!scene) continue;
     const image = scene.hasImage ? await getSceneImage(scene.id) : null;
-    assets[clip.sourceId] = await compositeFrame(image, scene.narration, true);
+    assets[clip.sourceId] = await compositeFrame(image, scene.narration, false);
+  }
+
+  // Captions: one transparent full-frame PNG per caption clip, keyed by clip id. The timeline's
+  // caption track is the source of truth (it survives reorder/split/trim), not the raw scenes.
+  const captions: Record<string, Blob> = {};
+  const captionTrack = timeline.tracks.find((t) => t.type === 'caption');
+  for (const clip of captionTrack?.clips ?? []) {
+    if (!clip.text?.trim()) continue;
+    captions[clip.id] = await renderCaptionOverlay(
+      clip.text,
+      timeline.outputWidth,
+      timeline.outputHeight,
+    );
   }
 
   // Video sources ship as their raw blobs; the backend compiler trims/renders them.
@@ -45,5 +60,5 @@ export async function exportTimelineVideo(
     if (blob) assets[asset.id] = blob;
   }
 
-  return renderTimeline(timeline, assets);
+  return renderTimeline(timeline, assets, captions);
 }
