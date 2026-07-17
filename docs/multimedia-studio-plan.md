@@ -1,6 +1,6 @@
 # Greyvetro Studio — Multimedia Creation Tool Plan
 
-> Status: **planned** (not started) · Drafted 2026-07-17
+> Status: **in progress** — Phase 1 (STT) built 2026-07-17 · Drafted 2026-07-17
 >
 > Converts the current TTS app into an AI-assisted **video assembler**: script
 > generation → voiceover → timestamped transcript → scene images → rendered mp4.
@@ -44,10 +44,10 @@ workflow needs both directions:
 
 | # | Notes step | Implementation | Effort |
 |---|---|---|---|
-| 1–2 | Master prompt → topic → script (Claude) | New backend `POST /script` calling the **Anthropic API** via the official C# SDK (`dotnet add package Anthropic`), model `claude-opus-4-8`. Same Command/Handler pattern as existing features. Adds `Anthropic:ApiKey` to backend config (env var `Anthropic__ApiKey`, never committed — same rule as the ElevenLabs key). | Small |
+| 1–2 | Master prompt → topic → script (LLM) | ~~Anthropic API~~ **Changed 2026-07-17: Google Gemini API** (user decision — free tier; the Anthropic API has no free tier). `POST /script` calls `generateContent` on `gemini-flash-latest` (rolling alias — pinned versions get retired for new keys; override via `GEMINI_MODEL`) through a named `HttpClient` — no SDK. Key in env var `GEMINI_APIKEY` (free at https://aistudio.google.com/apikey), optional: without it `/script` returns 503 with instructions. Same Command/Handler pattern as existing features. | Small |
 | 3 | Voiceover (ElevenLabs) | Already built: composer, voice picker, voice settings, model choice, takes. | ✅ Done |
 | 4 | Timestamped transcript | New backend `POST /stt` → ElevenLabs Scribe. Accepts the generated take's audio (or an uploaded file), returns text + word timestamps. Lives in `ElevenLabsService` next to the existing calls. | Small |
-| 5 | Timestamped script → scene prompts (Claude) | Same `/script` endpoint, different prompt mode: transcript in → JSON out (scene breaks: start/end time, narration excerpt, image prompt). Use **structured outputs** (`output_config.format` with a JSON schema) so parsing is reliable. | Small |
+| 5 | Timestamped script → scene prompts (LLM) | Built as a sibling endpoint `POST /script/scenes` (clearer REST than a mode flag): transcript + word timestamps in → scenes JSON out (start/end seconds, narration excerpt, image prompt). Uses Gemini **structured output** (`responseSchema` + `responseMimeType: application/json`) so parsing is reliable. | Small |
 | 6 | Generate images (Flow / Nano Banana 2) | **Manual for v1**: user generates images in Flow (per the notes: agent mode off, image mode, 1× output per prompt, paste each scene prompt) and **imports** them into scene slots. Optional later: Gemini API image generation (Nano Banana) — separate Google billing + integration, so deferred. | v1: none / later: Medium |
 | — | Assemble → mp4 | Storyboard UI + backend ffmpeg render (see §5). | Medium |
 
@@ -89,8 +89,8 @@ Everything follows the existing conventions — no structural changes.
 | Phase | Deliverable | Size |
 |---|---|---|
 | **0. Rename** | Repo/folder `greyvetro-stt` → `greyvetro-studio`; update both CLAUDE.md files + README. .NET namespaces (`Greyvetro.*`) are already generic — no code churn. Avoid "STT" in the name; the app is TTS-first ("studio" reads better). | XS |
-| **1. STT** | `POST /stt` (ElevenLabs Scribe, word timestamps) + "Transcribe" action on a saved take in the web UI. | S |
-| **2. Script generation** | `POST /script` (Anthropic C# SDK, `claude-opus-4-8`, structured outputs for scene mode) + composer "Write script with AI" entry point and scene-prompt generation from a transcript. | S |
+| **1. STT** ✅ | `POST /stt` (ElevenLabs Scribe, word timestamps) + "Transcribe" action on a saved take in the web UI. Built 2026-07-17: `TranscribeAudioCommand`/`Handler`, `Transcript` entity, Scribe called via a typed `HttpClient` (the ElevenLabs-DotNet SDK has no STT endpoint); web gallery cards get a "📝 Transcribe" chip → transcript stored on the `GalleryItem` in IndexedDB → `TranscriptModal` (full text / word-timings views, copy). **Requires the ElevenLabs API key to have the `speech_to_text` permission** — enable it on the key in the ElevenLabs dashboard (verified 401 `missing_permissions` otherwise). | S |
+| **2. Script generation** ✅ | Built 2026-07-17 on **Gemini** (see §3 rows 1–2, 5): `POST /script` (topic → TTS-ready script) + `POST /script/scenes` (transcript → scenes JSON via structured output), `GeminiService` in Infrastructure, `GenerateScriptHandler`/`GenerateScenesHandler`. Web UI: composer "✨ Write with AI" chip → `ScriptAssistModal` (topic, style, ~30/60/90/120s) fills the script editor; TranscriptModal "🎬 Scene prompts" view lists scenes with per-scene copy-prompt buttons (paste into Flow). Requires `GEMINI_APIKEY`. | S |
 | **3. Storyboard** | `features/storyboard/` in the web app: scenes from timestamps, image upload per scene, reorder, synced audio+image preview. IndexedDB `scenes` store. | M |
 | **4. Render** | `POST /render` ffmpeg pipeline (images + durations + audio, optional Ken Burns zoom + caption burn-in) → mp4 download. | M |
 | **5. Later (optional)** | Nano Banana / Gemini image generation via API · voice preview & favorites · clip trimming · transitions · Flutter parity. | — |
@@ -101,8 +101,16 @@ Phases 1 and 2 are independent; 3 depends on 1 (timestamps), 4 depends on 3.
 
 - **ElevenLabs Scribe** is available on the current account tier (STT is not
   gated like voice cloning) — verify credit cost per minute when wiring it up.
-- **Anthropic API key** required for phases 2+. Config pattern mirrors
-  `ElevenLabs__ApiKey`. Never in any committed file.
+  **Note (found during Phase 1):** the API key is scoped, so it needs the
+  `speech_to_text` permission enabled in the ElevenLabs dashboard — done
+  2026-07-17; `/stt` verified end-to-end with word timestamps.
+- ~~**Anthropic API key** required for phases 2+~~ **Superseded 2026-07-17:**
+  Phase 2 uses the **Google Gemini API free tier** instead (user decision — no
+  Anthropic free tier exists). Env var `GEMINI_APIKEY`; never in any committed
+  file. Free-tier rate limits (a handful of requests/min on the flash models)
+  are ample for this workflow. The same key can also use Gemini image models
+  (`gemini-3-pro-image`, `nano-banana-pro-preview`) — the Phase 5 automation
+  path.
 - **Flow has no public API** — it's a UI. That's why v1 keeps image generation
   manual (copy prompt → generate in Flow → import). Nano Banana (Gemini image
   models) is the API path if/when automating.

@@ -48,10 +48,10 @@ export async function addGalleryItem(
   return meta;
 }
 
-/** Patch metadata (title, projectId, …) on an existing item, keeping its audio. */
+/** Patch metadata (title, projectId, transcript, …) on an existing item, keeping its audio. */
 export async function updateGalleryItem(
   id: string,
-  patch: Partial<Pick<GalleryItem, 'title' | 'projectId'>>,
+  patch: Partial<Pick<GalleryItem, 'title' | 'projectId' | 'transcript'>>,
 ): Promise<void> {
   const db = await openDb();
   const tx = db.transaction(GALLERY_STORE, 'readwrite');

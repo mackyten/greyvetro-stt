@@ -1,4 +1,11 @@
-import { DEFAULT_MODEL_ID, type Usage, type Voice, type VoiceSettings } from './types';
+import {
+  DEFAULT_MODEL_ID,
+  type Scene,
+  type Transcript,
+  type Usage,
+  type Voice,
+  type VoiceSettings,
+} from './types';
 
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:5050';
 
@@ -41,6 +48,42 @@ export async function generateSpeech(
     }),
   );
   return res.blob();
+}
+
+export async function transcribeAudio(audio: Blob, fileName = 'clip.mp3'): Promise<Transcript> {
+  const form = new FormData();
+  form.append('file', audio, fileName);
+  const res = await checkStatus(await fetch(`${BASE}/stt`, { method: 'POST', body: form }));
+  return res.json();
+}
+
+export async function generateScript(
+  topic: string,
+  instructions?: string,
+  targetSeconds = 60,
+): Promise<string> {
+  const res = await checkStatus(
+    await fetch(`${BASE}/script`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, instructions, targetSeconds }),
+    }),
+  );
+  return (await res.json()).script;
+}
+
+export async function generateScenes(
+  transcript: Transcript,
+  instructions?: string,
+): Promise<Scene[]> {
+  const res = await checkStatus(
+    await fetch(`${BASE}/script/scenes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript, instructions }),
+    }),
+  );
+  return (await res.json()).scenes;
 }
 
 export async function cloneVoice(

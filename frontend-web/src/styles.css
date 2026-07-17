@@ -313,6 +313,20 @@ h3 {
   border-top: 1px solid var(--border);
 }
 
+.editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.editor-footer .editor-meta {
+  padding-top: 0;
+  border-top: none;
+}
+
 .rail {
   display: flex;
   flex-direction: column;
@@ -992,6 +1006,94 @@ input[type='range'] {
 
 .gallery-card .chip {
   align-self: flex-start;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---------- Transcript modal ---------- */
+
+.transcript-body {
+  overflow: hidden;
+}
+
+.transcript-scroll {
+  overflow-y: auto;
+  max-height: 48vh;
+  padding-right: 4px;
+}
+
+.transcript-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.word-timing {
+  font-size: 12.5px;
+  padding: 2px 0;
+}
+
+.word-timing .mono {
+  color: var(--muted);
+  font-size: 11px;
+  margin-right: 8px;
+}
+
+.transcript-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Write with AI / scene prompts ---------- */
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.assist-topic {
+  min-height: 72px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.scene-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-alt);
+  margin-bottom: 8px;
+}
+
+.scene-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scene-head .mono {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.scene-narration {
+  font-size: 12.5px;
+  color: var(--heading);
+  margin: 6px 0 4px;
+}
+
+.scene-prompt {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
 }
 
 .sample-list {

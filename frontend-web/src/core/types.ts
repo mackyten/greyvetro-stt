@@ -102,6 +102,29 @@ export function sameSettings(
   );
 }
 
+export interface TranscriptWord {
+  text: string;
+  /** Seconds from the start of the audio. */
+  start: number;
+  end: number;
+  /** 'word' | 'spacing' | 'audio_event' (ElevenLabs Scribe categories). */
+  type: string;
+}
+
+export interface Transcript {
+  text: string;
+  languageCode: string;
+  words: TranscriptWord[];
+}
+
+/** A storyboard scene proposed from a transcript (Greyvetro Studio). */
+export interface Scene {
+  start: number; // seconds
+  end: number;
+  narration: string;
+  imagePrompt: string;
+}
+
 export interface GalleryItem extends VoiceSettings {
   id: string;
   text: string;
@@ -110,6 +133,7 @@ export interface GalleryItem extends VoiceSettings {
   createdAt: string; // ISO
   projectId?: string; // absent = "Unsorted"
   title?: string;
+  transcript?: Transcript; // word-timestamped STT result, set on demand
 }
 
 export interface Project {

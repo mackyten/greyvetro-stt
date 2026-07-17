@@ -14,6 +14,7 @@ import {
 } from '../../core/types';
 import { addGalleryItem } from '../gallery/galleryRepo';
 import { ProjectSelect } from '../projects/ProjectSelect';
+import { ScriptAssistModal } from '../script/ScriptAssistModal';
 import { loadPresets } from '../presets/presetRepo';
 import { SavePresetModal } from '../presets/SavePresetModal';
 import { VoicePickerModal } from '../voices/VoicePickerModal';
@@ -72,6 +73,7 @@ export function Composer({ draft, onGenerated }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [assistOpen, setAssistOpen] = useState(false);
   const [presetMenu, setPresetMenu] = useState<Preset[] | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,7 +173,12 @@ export function Composer({ draft, onGenerated }: Props) {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
-          <div className="editor-meta mono">{text.length.toLocaleString()} characters</div>
+          <div className="editor-footer">
+            <span className="editor-meta mono">{text.length.toLocaleString()} characters</span>
+            <button className="chip" onClick={() => setAssistOpen(true)}>
+              ✨ Write with AI
+            </button>
+          </div>
         </div>
 
         <div className="rail">
@@ -351,6 +358,16 @@ export function Composer({ draft, onGenerated }: Props) {
           onRegenerate={generate}
           onDiscard={discardTake}
           onClose={() => setReviewOpen(false)}
+        />
+      )}
+
+      {assistOpen && (
+        <ScriptAssistModal
+          onResult={(script) => {
+            setText(script);
+            toast('Script written — tweak it, then generate.');
+          }}
+          onClose={() => setAssistOpen(false)}
         />
       )}
 

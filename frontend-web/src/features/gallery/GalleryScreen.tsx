@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { useEffect, useState } from 'react';
+import { transcribeAudio } from '../../core/api';
 import { useToast } from '../../core/toast';
 import {
   settingsSummary,
@@ -9,6 +10,7 @@ import {
   type VoiceSettings,
 } from '../../core/types';
 import { SavePresetModal } from '../presets/SavePresetModal';
+import { TranscriptModal } from '../stt/TranscriptModal';
 import { ProjectNameModal } from '../projects/ProjectNameModal';
 import { addProject, deleteProject, listProjects, renameProject } from '../projects/projectRepo';
 import { AudioPlayer } from '../tts/AudioPlayer';
@@ -53,6 +55,8 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
   const [renameDraft, setRenameDraft] = useState('');
   const [projectModal, setProjectModal] = useState<'create' | 'rename' | null>(null);
   const [zipping, setZipping] = useState(false);
+  const [transcribingId, setTranscribingId] = useState<string | null>(null);
+  const [transcriptView, setTranscriptView] = useState<GalleryItem | null>(null);
 
   useEffect(() => {
     let urls: string[] = [];
@@ -137,6 +141,31 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
     );
     setFilter('all');
     toast(`Project “${activeProject.name}” deleted — clips kept in Unsorted.`, 'info');
+  };
+
+  const transcribe = async (item: GalleryItem) => {
+    if (item.transcript) {
+      setTranscriptView(item);
+      return;
+    }
+    if (transcribingId) return;
+    setTranscribingId(item.id);
+    try {
+      const blob = await getGalleryAudio(item.id);
+      if (!blob) {
+        toast('Audio for this clip is missing.', 'error');
+        return;
+      }
+      const transcript = await transcribeAudio(blob, `${slugify(clipTitle(item))}.mp3`);
+      await updateGalleryItem(item.id, { transcript });
+      const updated = { ...item, transcript };
+      setItems((list) => list?.map((i) => (i.id === item.id ? updated : i)) ?? null);
+      setTranscriptView(updated);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Transcription failed.', 'error');
+    } finally {
+      setTranscribingId(null);
+    }
   };
 
   const downloadZip = async () => {
@@ -314,9 +343,22 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
                   autoPlay={false}
                 />
               )}
-              <button className="chip" onClick={() => onEditRegenerate(item)}>
-                ✎ Edit & regenerate
-              </button>
+              <div className="card-actions">
+                <button className="chip" onClick={() => onEditRegenerate(item)}>
+                  ✎ Edit & regenerate
+                </button>
+                <button
+                  className="chip"
+                  disabled={transcribingId === item.id}
+                  onClick={() => transcribe(item)}
+                >
+                  {transcribingId === item.id
+                    ? 'Transcribing…'
+                    : item.transcript
+                      ? '📝 Transcript'
+                      : '📝 Transcribe'}
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -328,6 +370,14 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
           voiceName={presetSource.voiceName}
           settings={settingsOf(presetSource)}
           onClose={() => setPresetSource(null)}
+        />
+      )}
+
+      {transcriptView?.transcript && (
+        <TranscriptModal
+          title={clipTitle(transcriptView)}
+          transcript={transcriptView.transcript}
+          onClose={() => setTranscriptView(null)}
         />
       )}
 

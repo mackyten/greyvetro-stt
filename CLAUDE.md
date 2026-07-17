@@ -70,6 +70,10 @@ Alternatively, put it in the git-ignored `Greyvetro.API/appsettings.json` under
 `{ "ElevenLabs": { "ApiKey": "sk_..." } }` — .NET reads either. Keep the key out
 of any committed file.
 
+For AI script/scene generation (Greyvetro Studio Phase 2), also export
+`GEMINI_APIKEY` (free key from https://aistudio.google.com/apikey). Optional —
+`/script` endpoints return 503 with instructions until it is set.
+
 **Desktop frontend** (from `frontend/`):
 ```bash
 flutter run -d macos
@@ -134,10 +138,39 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
 5. ✅ **Local gallery** — `GalleryRepository` persists audio + metadata under app documents dir; `GalleryScreen` (Gallery tab) replays, shows text, edit & regenerate, export, delete. Shared `AudioPlayer` (`core/audio_player.dart`). Navigation via `HomeShell`.
 6. ✅ **Desktop UI/UX overhaul** — full redesign from a Claude Design spec, built in 6 phases. **Left sidebar** nav replaces the bottom bar (`features/home/app_sidebar.dart`; responsive labelled 212px / 64px icon rail, hosts logo + nav + credit card + theme toggle). Composer is the **"1a Studio"** editor-forward layout (big script editor + right rail: voice / collapsible settings / gradient Generate / result), reflows to one column below 880px. Gallery & Presets use a **responsive masonry grid** (3/2/1-up). Voice Picker is a shared **centered modal** (`features/voices/voice_picker.dart`, used by composer + preset editor). Create-my-voice & preset editor restyled. `AudioScrubber` has a gradient seek track. Manrope/JetBrains Mono fonts; **dark mode** throughout.
 
-7. **Greyvetro Studio — multimedia creation tool** (planned, not started) — see
+7. **Greyvetro Studio — multimedia creation tool** (in progress) — see
    [docs/multimedia-studio-plan.md](docs/multimedia-studio-plan.md) for the full
    plan: rename → STT endpoint (ElevenLabs Scribe) → Claude script/scene
    generation → storyboard UI on top of Projects → ffmpeg render.
+   - ✅ **Phase 1 — STT**: `POST /stt` (multipart audio → ElevenLabs Scribe
+     `scribe_v1`, word-level timestamps; Scribe is called through a typed
+     `HttpClient` in `ElevenLabsService` because the SDK has no STT endpoint).
+     Web gallery cards have a "📝 Transcribe" chip; the transcript persists on
+     the `GalleryItem` in IndexedDB (no version bump needed) and opens in
+     `features/stt/TranscriptModal.tsx` (text / word-timings views, copy).
+     The ElevenLabs API key must have the **`speech_to_text` permission**
+     (scoped keys return 401 `missing_permissions` otherwise) — enabled on the
+     current key 2026-07-17; verified end-to-end with word timestamps.
+   - ✅ **Phase 2 — Script generation (Gemini, not Anthropic)**: the plan's
+     Anthropic-API choice was superseded 2026-07-17 (user wanted a free tier).
+     `POST /script` (topic → TTS-ready script) and `POST /script/scenes`
+     (transcript → scene JSON via Gemini structured output) call
+     `generateContent` on **`gemini-flash-latest`** (`GEMINI_MODEL` overrides;
+     use the rolling alias — pinned versions like `gemini-2.5-flash` get
+     retired for new API keys, returning 404)
+     through a named `HttpClient` in `Greyvetro.Infrastructure/Gemini/GeminiService.cs`.
+     Verified end-to-end 2026-07-17: topic → script → `/tts` voiceover →
+     `/stt` transcript → 5 contiguous scenes with style-consistent prompts.
+     Note: this Gemini key also has access to image models
+     (`gemini-3-pro-image`, `nano-banana-pro-preview`) — relevant to Phase 5
+     automated image generation.
+     `GEMINI_APIKEY` env var (free at https://aistudio.google.com/apikey) is
+     **optional** — endpoints return 503 with instructions until set. Web UI:
+     composer "✨ Write with AI" chip (`features/script/ScriptAssistModal.tsx`)
+     and a "🎬 Scene prompts" view in the TranscriptModal with per-scene
+     copy-prompt buttons for Flow.
+   - Phase 0 (repo rename) is deliberately deferred pending name confirmation
+     (`greyvetro-studio` proposed); Phases 3–4 not started.
 
 ### Candidate additions
 - ✅ **Voice settings** — "Voice settings" card in the composer: **Stability**, **Similarity**, **Style** sliders + a **Speaker boost** toggle (on by default — strongest lever for cloned-voice likeness). All four flow through `TtsRequest` → `VoiceSettings`, are stored per gallery item, and restored on edit/regenerate. (Flutter still hardcodes `eleven_multilingual_v2`; the **web** frontend has a Model dropdown — v2 / Eleven v3 / Turbo / Flash — carried through `/tts` `modelId`, gallery items, and presets.)
