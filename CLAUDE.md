@@ -239,9 +239,9 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        (voiceover stays the only audio track). Verified: photo+video render →
        6s@30 (180 frames), photo span still / video span motion (frame-diffed);
        photo-only path byte-identical. Deferred at the time: frame-accurate
-       `<video>` scrub preview, per-clip trim UI, video audio mixing — the latter
-       two have since shipped (TL Phase 2's trim handles; video audio mixing
-       below). Frame-accurate scrub preview remains deferred.
+       `<video>` scrub preview, per-clip trim UI, video audio mixing — all three
+       have since shipped (TL Phase 2's trim handles; video audio mixing and
+       frame-accurate scrub preview below).
      - ✅ **TL Phase 2 — Interactive editing** (shipped 2026-07-18): the Timeline
        tab is now an editor (`TimelineEditor.tsx`), not a read-only view. Per-clip
        **select**, **drag-to-reorder** (HTML5 DnD, within a lane), **trim** both
@@ -383,8 +383,22 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        `/render` POST — silent voiceover + a video clip with an embedded 440Hz
        tone: exported audio at the noise floor (-39.7dB) during the photo-only
        window, a clear tone (-23.8dB) exactly during the video's window.
-     - Remaining: frame-accurate `<video>` scrub preview (still deferred);
-       transitions/undo-redo scope cuts above, if ever needed.
+     - ✅ **Frame-accurate `<video>` scrub preview** (shipped 2026-07-20): the
+       last deferred item from the original video-ingestion slice. Video-sourced
+       clips in the preview (`VideoFrame` component, `TimelineEditor.tsx`) render
+       as a real `<video>` seeked to `inPoint + clamp(ph − startTime, 0,
+       duration)` — frame-accurate when paused/scrubbing; during playback the
+       video's own clock runs and only resyncs past a 0.3s drift threshold
+       (avoids reseek-induced stutter). Covers both the base-track preview clip
+       and video-type overlay clips (no UI adds one yet, but the compositing path
+       is shared). `TimelineScreen.tsx` now also tracks a `videoUrls` (raw blob)
+       map alongside the existing poster-frame `imageUrls`. Frontend-only, no
+       compiler change. Verified: build/lint clean, backend suite untouched
+       (38/38). Live browser scrub verification hit an unrelated environment
+       limit (this session's automated Chrome never progresses any `<video>`
+       past `readyState 0`, which also blocks the pre-existing `capturePoster`
+       poster capture the same way) — not a regression from this change.
+     - Remaining: transitions/undo-redo scope cuts above, if ever needed.
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), clip

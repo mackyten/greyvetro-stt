@@ -84,6 +84,7 @@ interface TrimDrag {
 export function TimelineEditor({
   timeline,
   imageUrls,
+  videoUrls,
   audioUrl,
   onChange,
   canUndo,
@@ -93,6 +94,9 @@ export function TimelineEditor({
 }: {
   timeline: Timeline;
   imageUrls: Record<string, string>;
+  /** Raw video blob URLs (keyed by MediaAsset id) — separate from `imageUrls`' poster frames,
+   * lets the preview show real frame-accurate video instead of a static thumbnail. */
+  videoUrls: Record<string, string>;
   audioUrl: string | null;
   onChange: (next: Timeline) => void;
   canUndo: boolean;
@@ -126,8 +130,10 @@ export function TimelineEditor({
   };
 
   // Playback: a rAF clock advances the playhead (master), the voiceover follows, and the frame
-  // preview swaps stills as `ph` moves. Video clips show their poster in preview (motion is an
-  // export-only concern this phase). Manual scrubs/edits stop playback.
+  // preview swaps stills as `ph` moves. Video clips render as real <video> (see VideoFrame below),
+  // seeked/played in sync with the playhead — frame-accurate when paused/scrubbing, loosely
+  // resynced during playback rather than reseeked every tick (avoids seek-induced stutter). Motion
+  // (Ken Burns) stays an export-only concern for stills. Manual scrubs/edits stop playback.
   const stop = useCallback(() => {
     setPlaying(false);
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
@@ -255,6 +261,8 @@ export function TimelineEditor({
   const activeVisual = visualClips.find((c) => ph >= c.startTime && ph < c.startTime + c.duration)
     ?? visualClips[visualClips.length - 1];
   const previewClip = !playing && selectedIsVisual && selectedClip ? selectedClip : activeVisual;
+  const previewIsVideo = !!previewClip && timeline.assets.find((a) => a.id === previewClip.sourceId)?.type === 'video';
+  const previewVideoUrl = previewClip && previewIsVideo ? videoUrls[previewClip.sourceId] : undefined;
   const activeCaption = timeline.tracks
     .find((t) => t.type === 'caption')
     ?.clips.find((c) => ph >= c.startTime && ph < c.startTime + c.duration)?.text;
@@ -419,26 +427,36 @@ export function TimelineEditor({
       <audio ref={audioElRef} src={audioUrl ?? undefined} preload="auto" />
       <div className="tl-head">
         <div className="tl-preview" aria-hidden>
-          {previewClip && imageUrls[previewClip.sourceId] ? (
+          {previewClip && previewIsVideo && previewVideoUrl ? (
+            <VideoFrame clip={previewClip} src={previewVideoUrl} ph={ph} playing={playing} style={cropStyle} />
+          ) : previewClip && imageUrls[previewClip.sourceId] ? (
             <img src={imageUrls[previewClip.sourceId]} alt="" style={cropStyle} />
           ) : (
             <div className="tl-preview-empty">🎬</div>
           )}
-          {activeOverlays.map((c) =>
-            imageUrls[c.sourceId] ? (
-              <img
+          {activeOverlays.map((c) => {
+            const overlayIsVideo = timeline.assets.find((a) => a.id === c.sourceId)?.type === 'video';
+            const overlaySrc = overlayIsVideo ? videoUrls[c.sourceId] : imageUrls[c.sourceId];
+            if (!overlaySrc) return null;
+            const overlayStyle = {
+              left: `${(c.position?.x ?? 0) * 100}%`,
+              top: `${(c.position?.y ?? 0) * 100}%`,
+              width: `${(c.scale ?? 0.3) * 100}%`,
+            };
+            return overlayIsVideo ? (
+              <VideoFrame
                 key={c.id}
+                clip={c}
+                src={overlaySrc}
+                ph={ph}
+                playing={playing}
                 className="tl-preview-overlay"
-                src={imageUrls[c.sourceId]}
-                alt=""
-                style={{
-                  left: `${(c.position?.x ?? 0) * 100}%`,
-                  top: `${(c.position?.y ?? 0) * 100}%`,
-                  width: `${(c.scale ?? 0.3) * 100}%`,
-                }}
+                style={overlayStyle}
               />
-            ) : null,
-          )}
+            ) : (
+              <img key={c.id} className="tl-preview-overlay" src={overlaySrc} alt="" style={overlayStyle} />
+            );
+          })}
           {activeCaption && <div className="tl-preview-caption">{activeCaption}</div>}
         </div>
 
@@ -949,6 +967,49 @@ export function TimelineEditor({
       </div>
     </div>
   );
+}
+
+/**
+ * A real `<video>` preview for a video-sourced clip, seeked/played to track the shared playhead —
+ * replaces the static poster the preview used to show for video clips. Muted (the preview mixes no
+ * audio; that's an export-only concern handled by `includeAudio`). Paused/scrubbing seeks exactly
+ * (frame-accurate); during playback it lets the video's own clock run and only resyncs past a
+ * drift threshold, so scrubbing doesn't fight a reseek every rAF tick.
+ */
+function VideoFrame({
+  clip,
+  src,
+  ph,
+  playing,
+  className,
+  style,
+}: {
+  clip: Clip;
+  src: string;
+  ph: number;
+  playing: boolean;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    const localT = Math.min(Math.max(ph - clip.startTime, 0), Math.max(clip.duration - 0.001, 0));
+    const sourceT = clip.inPoint + localT;
+    if (playing) {
+      if (video.paused) {
+        video.currentTime = sourceT;
+        void video.play().catch(() => {});
+      } else if (Math.abs(video.currentTime - sourceT) > 0.3) {
+        video.currentTime = sourceT;
+      }
+    } else {
+      if (!video.paused) video.pause();
+      if (Math.abs(video.currentTime - sourceT) > 0.03) video.currentTime = sourceT;
+    }
+  }, [clip, ph, playing]);
+  return <video ref={ref} src={src} className={className} style={style} muted playsInline preload="auto" />;
 }
 
 function ClipBar({

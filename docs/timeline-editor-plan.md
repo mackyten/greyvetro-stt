@@ -26,7 +26,8 @@ in the actual code (`FfmpegVideoRenderer.cs`, `Program.cs` `/render`,
 > photo+video render (photo span still, video span motion, frame-diffed). Per-clip
 > trim UI landed with Phase 2's general trim handles (stills change `duration`;
 > video also moves `inPoint`/`outPoint`); mixing the video's own audio landed after
-> Phase 6 (below). Still deferred: frame-accurate `<video>` scrub preview.
+> Phase 6 (below), and frame-accurate `<video>` scrub preview landed after that
+> (below) — closing out every item once deferred from this slice.
 >
 > **Video-clip own-audio mixing shipped (2026-07-20, after Phase 6).** A base-
 > track video clip can opt in (`Clip.IncludeAudio`) to mix its own embedded audio
@@ -46,7 +47,31 @@ in the actual code (`FfmpegVideoRenderer.cs`, `Program.cs` `/render`,
 > `/render` POST — a silent voiceover + a video clip with an embedded 440Hz tone:
 > the exported audio sat at a silence noise floor (-39.7dB mean) during the
 > photo-only window and jumped to a clear tone (-23.8dB mean) exactly during the
-> video's window. Phases 2–6 below are the remaining work.
+> video's window.
+>
+> **Frame-accurate `<video>` scrub preview shipped (2026-07-20).** The last item
+> from the original video-ingestion slice (§4's risk note): video-sourced clips
+> in the preview now render as a real `<video>` element (`VideoFrame` in
+> `TimelineEditor.tsx`) instead of a static poster, seeked to the clip's actual
+> source time (`inPoint + clamp(ph - startTime, 0, duration)`) — frame-accurate
+> when paused/scrubbing. During playback the video's own clock is left to run
+> and only resynced past a 0.3s drift threshold, rather than reseeking on every
+> rAF tick (avoids seek-induced stutter that §4 flagged as the risk with a naive
+> per-frame seek). Applies to both the base-track preview clip and PiP/logo
+> overlay clips of type `video` (the latter has no UI to create yet, but the
+> compositing path is shared, so it's ready if one is added). Frontend-only —
+> no backend/compiler change; `TimelineScreen.tsx` now keeps a `videoUrls` map
+> (raw blob object URLs) alongside the existing poster-frame `imageUrls`.
+> Verified: `tsc -b && vite build` + lint clean, backend suite untouched (still
+> 38/38, no C# changed). Live in-browser scrub verification was attempted but
+> blocked by an unrelated environment limit — this sandboxed Chrome instance
+> never progresses a `<video>` past `readyState 0` for *any* source (confirmed
+> even for a plain direct navigation to an `ffprobe`-verified-good mp4), which
+> also stalls the pre-existing `capturePoster` poster-frame capture the same
+> way — not a regression from this change, just not independently confirmable
+> pixel-by-pixel in this particular session. Nothing from the original
+> video-ingestion slice is deferred anymore; Phases 2–6 above are the
+> remaining Timeline work.
 
 ---
 
@@ -215,6 +240,10 @@ Makes editing feel live instead of "edit blind, then wait for a render."
 **Risk (scoping input):** frame-accurate seeking of `<video>.currentTime` in a
 rAF loop is janky in browsers and gets worse with multiple stacked video layers.
 Trivial for stills. This is the main reason video ingestion is a later phase.
+**Resolved 2026-07-20** (see the shipped-items blockquote above): the risk was
+avoided rather than engineered around — seek exactly when paused/scrubbing,
+but during playback let the video's own clock run and only reseek past a
+drift threshold, instead of reseeking every rAF tick.
 
 ---
 
@@ -391,7 +420,8 @@ storyboard.
   removing the last visual clip), a click-to-scrub playhead, and **Play/Pause**
   playback — a rAF clock advances the playhead and drives the synced voiceover,
   and a live frame+caption preview swaps stills as it plays (video shows its
-  poster; frame-accurate video preview stays deferred, §4 risk). Pure ops
+  poster at this point; frame-accurate video preview shipped later — see the
+  blockquote near the top of this doc). Pure ops
   (`reanchor`/`moveClip`/`trimClip`/`splitClip`/
   `deleteClip` in `timelineOps.ts`) keep the base track contiguous (it's a
   `concat`) and re-derive the display-only caption lane by source id. **The saved

@@ -30,6 +30,7 @@ export function TimelineScreen() {
   const [scenes, setScenes] = useState<StoredScene[] | null>(null);
   const { timeline, load: loadTimeline, set: setTimeline, undo, redo, canUndo, canRedo } = useTimelineHistory();
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const audioRef = useRef<Blob | null>(null);
@@ -54,6 +55,7 @@ export function TimelineScreen() {
     }
     let cancelled = false;
     let urls: string[] = [];
+    let videoBlobUrls: string[] = [];
     let audioObjUrl: string | null = null;
     setScenes(null);
     loadTimeline(null);
@@ -89,13 +91,15 @@ export function TimelineScreen() {
         await saveTimeline(tl);
       }
 
-      // Poster frames for the video lane.
+      // Poster frames for the video lane (thumbnail) + the raw blob (frame-accurate scrub preview).
+      const videoMap: Record<string, string> = {};
       for (const asset of tl.assets) {
         if (asset.type !== 'video') continue;
         const blob = await getAsset(asset.id);
         if (!blob) continue;
         const poster = await capturePoster(blob);
         if (poster) map[asset.id] = URL.createObjectURL(poster);
+        videoMap[asset.id] = URL.createObjectURL(blob);
       }
 
       // Overlay (PiP/logo) image thumbnails — any image asset not already loaded above as a
@@ -108,12 +112,15 @@ export function TimelineScreen() {
 
       if (cancelled) {
         Object.values(map).forEach((u) => URL.revokeObjectURL(u));
+        Object.values(videoMap).forEach((u) => URL.revokeObjectURL(u));
         return;
       }
       urls = Object.values(map);
+      videoBlobUrls = Object.values(videoMap);
       audioRef.current = audio;
       audioObjUrl = audio ? URL.createObjectURL(audio) : null;
       setImageUrls(map);
+      setVideoUrls(videoMap);
       setAudioUrl(audioObjUrl);
       setScenes(list);
       loadTimeline(tl);
@@ -122,8 +129,10 @@ export function TimelineScreen() {
     return () => {
       cancelled = true;
       urls.forEach((u) => URL.revokeObjectURL(u));
+      videoBlobUrls.forEach((u) => URL.revokeObjectURL(u));
       if (audioObjUrl) URL.revokeObjectURL(audioObjUrl);
       setImageUrls({});
+      setVideoUrls({});
       setAudioUrl(null);
     };
   }, [projectId, loadTimeline]);
@@ -160,6 +169,7 @@ export function TimelineScreen() {
         const url = URL.createObjectURL(poster);
         setImageUrls((m) => ({ ...m, [assetId]: url }));
       }
+      setVideoUrls((m) => ({ ...m, [assetId]: URL.createObjectURL(file) }));
       setTimeline(next);
       toast(`Video added — ${meta.width}×${meta.height}, ${meta.duration.toFixed(1)}s.`);
     } catch (err) {
@@ -330,6 +340,7 @@ export function TimelineScreen() {
           <TimelineEditor
             timeline={timeline}
             imageUrls={imageUrls}
+            videoUrls={videoUrls}
             audioUrl={audioUrl}
             onChange={commit}
             canUndo={canUndo}
