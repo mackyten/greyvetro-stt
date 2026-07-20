@@ -727,4 +727,127 @@ public class FilterGraphCompilerTests
         var maps = plan.OutputArgs.ToList();
         Assert.Equal("[vout]", maps[maps.IndexOf("-map") + 1]);
     }
+
+    // --- Ken Burns motion (Phase 5) ---
+
+    private static (Timeline, Dictionary<string, string>) MotionCase(Motion? motion)
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips = [new Clip { Id = "c0", SourceId = "img", StartTime = 0, Duration = 4, Motion = motion }],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "aud", Duration = 4 }] },
+            ],
+            Assets = [new MediaAsset { Id = "img", Type = MediaType.Image }],
+        };
+        var paths = new Dictionary<string, string> { ["img"] = "/tmp/i.jpg", ["aud"] = "/tmp/a.mp3" };
+        return (timeline, paths);
+    }
+
+    [Fact]
+    public void Compile_ClipWithMotion_UsesUnboundedLoopInput_NoInputSideTrim()
+    {
+        var motion = new Motion
+        {
+            From = new KenBurnsKeyframe { Zoom = 1, PanX = 0.5, PanY = 0.5 },
+            To = new KenBurnsKeyframe { Zoom = 1.5, PanX = 0.5, PanY = 0.3 },
+        };
+        var (timeline, paths) = MotionCase(motion);
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // No -t alongside -loop 1: zoompan's own d + a trailing trim= bound the frame count instead
+        // (see ZoompanChain) — combining -loop 1 with an input-side -t re-runs the whole zoompan
+        // cycle once per demuxed frame, verified empirically against real ffmpeg.
+        Assert.Equal(
+            new[] { "-y", "-loop", "1", "-i", "/tmp/i.jpg", "-i", "/tmp/a.mp3" },
+            plan.InputArgs);
+    }
+
+    [Fact]
+    public void Compile_ClipWithMotion_EmitsZoompanWithLerpedKeyframesAndTrim()
+    {
+        var motion = new Motion
+        {
+            From = new KenBurnsKeyframe { Zoom = 1, PanX = 0.5, PanY = 0.5 },
+            To = new KenBurnsKeyframe { Zoom = 1.5, PanX = 0.5, PanY = 0.3 },
+        };
+        var (timeline, paths) = MotionCase(motion);
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // 4s @ 30fps = 120 frames, denom = 119. Pre-scaled to 3x headroom (3240x5760).
+        const string expected =
+            "[0:v]scale=3240:5760:force_original_aspect_ratio=increase,crop=3240:5760," +
+            "zoompan=z='1+0.5*on/119':" +
+            "x='min(max((0.5+0*on/119)*iw-(iw/zoom/2),0),iw-iw/zoom)':" +
+            "y='min(max((0.5+-0.2*on/119)*ih-(ih/zoom/2),0),ih-ih/zoom)':" +
+            "d=120:s=1080x1920:fps=30," +
+            "trim=end_frame=120,setpts=PTS-STARTPTS,setsar=1[v0];\n" +
+            "[v0]concat=n=1:v=1:a=0[vout]";
+        Assert.Equal(expected, Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_ClipWithIdenticalFromToMotion_IsANoOp_FallsBackToStaticChain()
+    {
+        var motion = new Motion
+        {
+            From = new KenBurnsKeyframe { Zoom = 1.2, PanX = 0.4, PanY = 0.4 },
+            To = new KenBurnsKeyframe { Zoom = 1.2, PanX = 0.4, PanY = 0.4 },
+        };
+        var (timeline, paths) = MotionCase(motion);
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.DoesNotContain("zoompan", Norm(plan.FilterComplex));
+        Assert.Contains("-loop", plan.InputArgs);
+        Assert.Contains("-t", plan.InputArgs); // static path keeps the input-side trim
+    }
+
+    [Fact]
+    public void Compile_ClipWithNoMotion_IsUnaffected()
+    {
+        var (timeline, paths) = MotionCase(null);
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.DoesNotContain("zoompan", Norm(plan.FilterComplex));
+        Assert.Contains(
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0]",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_VideoClipWithMotion_IgnoresMotion_StaysOnVideoTrimPath()
+    {
+        // Motion is a stills-only Ken Burns effect; a video source keeps its normal -ss/-t trim.
+        var motion = new Motion { To = new KenBurnsKeyframe { Zoom = 1.5 } };
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Video, ZIndex = 0,
+                    Clips = [new Clip { Id = "c0", SourceId = "vid", StartTime = 0, Duration = 4, Motion = motion }],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "aud", Duration = 4 }] },
+            ],
+            Assets = [new MediaAsset { Id = "vid", Type = MediaType.Video }],
+        };
+        var paths = new Dictionary<string, string> { ["vid"] = "/tmp/v.mp4", ["aud"] = "/tmp/a.mp3" };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.DoesNotContain("zoompan", Norm(plan.FilterComplex));
+        Assert.Contains("-ss", plan.InputArgs);
+    }
 }

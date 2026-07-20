@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { VOICEOVER_ASSET_ID } from './model/seed';
 import {
   cropFromZoomPan,
+  DEFAULT_MOTION,
   deleteClip,
   isOverlayTrack,
   MAX_ROTATION,
@@ -11,6 +12,7 @@ import {
   removeTrack,
   setClipFade,
   setCrop,
+  setMotion,
   setOverlayTransform,
   setRotation,
   setTrackAudio,
@@ -18,7 +20,7 @@ import {
   trimClip,
   zoomPanFromCrop,
 } from './model/timelineOps';
-import { timelineDuration, type Clip, type Timeline, type Track, type TrackType } from './model/types';
+import { timelineDuration, type Clip, type KenBurns, type Timeline, type Track, type TrackType } from './model/types';
 
 /** Lane display order (top → bottom) and labels. */
 const LANE_ORDER: TrackType[] = ['video', 'photo', 'caption', 'audio'];
@@ -210,18 +212,37 @@ export function TimelineEditor({
     .flatMap((t) => t.clips)
     .filter((c) => ph >= c.startTime && ph < c.startTime + c.duration);
 
-  // Reflect a clip's crop/reframe + tilt in the preview via CSS (approximate — the exact
-  // source-crop cover-fit + auto-zoomed rotation happens at export; §4 preview is for feedback,
-  // not pixel parity).
+  // Reflect a clip's crop/reframe + tilt (or, for a motion clip, the Ken Burns keyframe lerped to
+  // the current playhead position within it) in the preview via CSS — approximate, the exact
+  // source-crop cover-fit + auto-zoomed rotation/zoompan happens at export; §4 preview is for
+  // feedback, not pixel parity. Motion takes precedence, mirroring the compiler (ZoompanChain
+  // ignores static Crop/Rotation on an animated clip).
   const previewTransform: string[] = [];
-  if (previewClip?.crop) previewTransform.push(`scale(${(1 / previewClip.crop.width).toFixed(4)})`);
-  if (previewClip?.rotation) previewTransform.push(`rotate(${previewClip.rotation}deg)`);
+  let transformOriginPct = { x: 50, y: 50 };
+  if (previewClip?.motion) {
+    const localT =
+      previewClip.duration > 0
+        ? Math.min(Math.max((ph - previewClip.startTime) / previewClip.duration, 0), 1)
+        : 0;
+    const { from, to } = previewClip.motion;
+    const zoom = from.zoom + (to.zoom - from.zoom) * localT;
+    const panX = from.panX + (to.panX - from.panX) * localT;
+    const panY = from.panY + (to.panY - from.panY) * localT;
+    if (zoom > 1.001) previewTransform.push(`scale(${zoom.toFixed(4)})`);
+    transformOriginPct = { x: panX * 100, y: panY * 100 };
+  } else {
+    if (previewClip?.crop) previewTransform.push(`scale(${(1 / previewClip.crop.width).toFixed(4)})`);
+    if (previewClip?.rotation) previewTransform.push(`rotate(${previewClip.rotation}deg)`);
+    if (previewClip?.crop)
+      transformOriginPct = {
+        x: (previewClip.crop.x + previewClip.crop.width / 2) * 100,
+        y: (previewClip.crop.y + previewClip.crop.height / 2) * 100,
+      };
+  }
   const cropStyle = previewTransform.length
     ? {
         transform: previewTransform.join(' '),
-        transformOrigin: previewClip?.crop
-          ? `${((previewClip.crop.x + previewClip.crop.width / 2) * 100).toFixed(2)}% ${((previewClip.crop.y + previewClip.crop.height / 2) * 100).toFixed(2)}%`
-          : '50% 50%',
+        transformOrigin: `${transformOriginPct.x.toFixed(2)}% ${transformOriginPct.y.toFixed(2)}%`,
       }
     : undefined;
 
@@ -235,6 +256,15 @@ export function TimelineEditor({
   const applyRotation = (degrees: number) => {
     if (!selectedClip) return;
     onChange(setRotation(timeline, selectedClip.id, degrees));
+  };
+  const applyMotion = (patch: { from?: Partial<KenBurns>; to?: Partial<KenBurns> }) => {
+    if (!selectedClip?.motion) return;
+    onChange(
+      setMotion(timeline, selectedClip.id, {
+        from: { ...selectedClip.motion.from, ...patch.from },
+        to: { ...selectedClip.motion.to, ...patch.to },
+      }),
+    );
   };
   const applyOverlayTransform = (patch: { position?: { x: number; y: number }; scale?: number }) => {
     if (!selOverlay) return;
@@ -395,6 +425,86 @@ export function TimelineEditor({
                 />
               </label>
             </div>
+          ) : zoomPan && selectedClip?.motion ? (
+            <div className="tl-transform-inspector">
+              <div className="tl-motion-keyframe">
+                <span className="tl-motion-label">Start</span>
+                <label>
+                  Zoom
+                  <input
+                    type="range"
+                    min={1}
+                    max={MAX_ZOOM}
+                    step={0.05}
+                    value={selectedClip.motion.from.zoom}
+                    onChange={(e) => applyMotion({ from: { zoom: Number(e.target.value) } })}
+                  />
+                  <span className="mono">{selectedClip.motion.from.zoom.toFixed(2)}×</span>
+                </label>
+                <label>
+                  Pan X
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.02}
+                    value={selectedClip.motion.from.panX}
+                    onChange={(e) => applyMotion({ from: { panX: Number(e.target.value) } })}
+                  />
+                </label>
+                <label>
+                  Pan Y
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.02}
+                    value={selectedClip.motion.from.panY}
+                    onChange={(e) => applyMotion({ from: { panY: Number(e.target.value) } })}
+                  />
+                </label>
+              </div>
+              <div className="tl-motion-keyframe">
+                <span className="tl-motion-label">End</span>
+                <label>
+                  Zoom
+                  <input
+                    type="range"
+                    min={1}
+                    max={MAX_ZOOM}
+                    step={0.05}
+                    value={selectedClip.motion.to.zoom}
+                    onChange={(e) => applyMotion({ to: { zoom: Number(e.target.value) } })}
+                  />
+                  <span className="mono">{selectedClip.motion.to.zoom.toFixed(2)}×</span>
+                </label>
+                <label>
+                  Pan X
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.02}
+                    value={selectedClip.motion.to.panX}
+                    onChange={(e) => applyMotion({ to: { panX: Number(e.target.value) } })}
+                  />
+                </label>
+                <label>
+                  Pan Y
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.02}
+                    value={selectedClip.motion.to.panY}
+                    onChange={(e) => applyMotion({ to: { panY: Number(e.target.value) } })}
+                  />
+                </label>
+              </div>
+              <button className="chip" onClick={() => onChange(setMotion(timeline, selectedClip.id, null))}>
+                Remove motion
+              </button>
+            </div>
           ) : zoomPan && selectedClip ? (
             <div className="tl-transform-inspector">
               <label>
@@ -455,6 +565,9 @@ export function TimelineEditor({
               >
                 Reset framing
               </button>
+              <button className="chip" onClick={() => onChange(setMotion(timeline, selectedClip.id, DEFAULT_MOTION))}>
+                🎥 Add motion
+              </button>
             </div>
           ) : selOverlay ? (
             <div className="tl-transform-inspector">
@@ -496,8 +609,8 @@ export function TimelineEditor({
           ) : (
             <div className="tl-tools-hint">
               Click a clip to select · drag to reorder · drag an edge to trim · click the ruler to
-              move the playhead, then Split (S) or Delete. Select a scene to reframe (zoom/pan/tilt);
-              add music or an overlay, select it to adjust.
+              move the playhead, then Split (S) or Delete. Select a scene to reframe (zoom/pan/tilt)
+              or add Ken Burns motion; add music or an overlay, select it to adjust.
             </div>
           )}
         </div>

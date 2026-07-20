@@ -1,5 +1,5 @@
 import { VOICEOVER_ASSET_ID } from './seed';
-import { timelineDuration, type Clip, type MediaAsset, type Timeline, type Track } from './types';
+import { timelineDuration, type Clip, type KenBurns, type MediaAsset, type Timeline, type Track } from './types';
 
 /** Smallest clip length the editor allows (seconds) — keeps trims/splits well-formed. */
 export const MIN_CLIP = 0.3;
@@ -296,6 +296,27 @@ export function setRotation(timeline: Timeline, clipId: string, rotation: number
     track.clips.map((c) =>
       c.id === clipId ? { ...c, rotation: rotation && Math.abs(rotation) > 0.01 ? rotation : undefined } : c,
     ),
+  );
+}
+
+/** Default Ken Burns keyframes for a freshly enabled motion clip: a gentle static-to-punched-in zoom. */
+export const DEFAULT_MOTION: { from: KenBurns; to: KenBurns } = {
+  from: { zoom: 1, panX: 0.5, panY: 0.5 },
+  to: { zoom: 1.3, panX: 0.5, panY: 0.5 },
+};
+
+/** Set (or clear, with null) a visual clip's keyframed Ken Burns pan/zoom. Pure. */
+export function setMotion(
+  timeline: Timeline,
+  clipId: string,
+  motion: { from: KenBurns; to: KenBurns } | null,
+): Timeline {
+  const track = trackOf(timeline, clipId);
+  if (!track || !isVisual(track)) return timeline;
+  return withTrackClips(
+    timeline,
+    track.id,
+    track.clips.map((c) => (c.id === clipId ? { ...c, motion: motion ?? undefined } : c)),
   );
 }
 

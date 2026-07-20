@@ -70,13 +70,21 @@ public class FilterGraphCompiler
             var clip = visualClips[i];
             var duration = FfmpegProcess.Fmt(clip.Duration);
             var hasSource = assetPaths.TryGetValue(clip.SourceId, out var path);
+            var isVideo = hasSource && TypeOf(clip.SourceId) == MediaType.Video;
+            var useMotion = hasSource && !isVideo && IsAnimated(clip.Motion);
 
-            if (hasSource && TypeOf(clip.SourceId) == MediaType.Video)
+            if (isVideo)
             {
                 // Real video: input-seek to the trim in-point and read `duration` seconds. The
                 // clip's own audio is ignored (v1 keeps the voiceover as the only audio track).
                 hasVideo = true;
                 inputs.AddRange(["-ss", FfmpegProcess.Fmt(clip.InPoint), "-t", duration, "-i", path!]);
+            }
+            else if (useMotion)
+            {
+                // No -t: zoompan's own `d` (frame count) plus the trailing `trim=end_frame=` bound
+                // this clip's frame count on their own — see ZoompanChain.
+                inputs.AddRange(["-loop", "1", "-i", path!]);
             }
             else if (hasSource)
             {
@@ -88,13 +96,11 @@ public class FilterGraphCompiler
                     $"color=c={PlaceholderColor}:s={w}x{h}:r={fps}"]);
             }
 
-            // Optional reframe: crop a normalized source region first (zoom/pan), then cover-fit.
-            // Full-frame/absent crop emits nothing, so an un-transformed clip stays byte-identical.
-            filters.Append($"[{i}:v]{CropPrefix(clip.Crop)}scale={w}:{h}:force_original_aspect_ratio=increase,")
-                .Append($"crop={w}:{h}")
-                .Append(RotateSuffix(clip.Rotation, w, h))
-                .Append($",setsar=1,fps={fps}")
-                .AppendLine($"[v{i}];");
+            var chain = useMotion
+                ? ZoompanChain(clip.Motion!, clip.Duration, w, h, fps)
+                : $"{CropPrefix(clip.Crop)}scale={w}:{h}:force_original_aspect_ratio=increase," +
+                  $"crop={w}:{h}{RotateSuffix(clip.Rotation, w, h)},setsar=1,fps={fps}";
+            filters.Append($"[{i}:v]{chain}").AppendLine($"[v{i}];");
         }
 
         filters.Append(string.Concat(Enumerable.Range(0, visualClips.Count).Select(i => $"[v{i}]")))
@@ -301,5 +307,54 @@ public class FilterGraphCompiler
         var zw = (int)Math.Ceiling(w * k);
         var zh = (int)Math.Ceiling(h * k);
         return $",scale={zw}:{zh},rotate={FfmpegProcess.Fmt(rotationDegrees.Value)}*PI/180:ow={w}:oh={h}:c=black";
+    }
+
+    /// <summary>True when a clip's Motion has distinct From/To keyframes — an identical pair is a
+    /// no-op that falls back to the (cheaper) static chain instead of running zoompan.</summary>
+    private static bool IsAnimated(Motion? motion) =>
+        motion is not null && (
+            Math.Abs(motion.From.Zoom - motion.To.Zoom) > 1e-6 ||
+            Math.Abs(motion.From.PanX - motion.To.PanX) > 1e-6 ||
+            Math.Abs(motion.From.PanY - motion.To.PanY) > 1e-6);
+
+    /// <summary>
+    /// Pre-scale-then-<c>zoompan</c> chain size the crop window stays at (at least) native output
+    /// resolution even at the deepest keyframed zoom, so panning/zooming in doesn't soften the image.
+    /// </summary>
+    private const int KenBurnsHeadroom = 3;
+
+    /// <summary>
+    /// A Ken Burns chain that animates linearly from <paramref name="motion"/>'s <c>From</c> to
+    /// <c>To</c> keyframe across the clip's full duration. Verified empirically against ffmpeg 8.1
+    /// (docs/timeline-editor-plan.md §9): the source must be fed as an unbounded <c>-loop 1 -i</c>
+    /// input (no input-side <c>-t</c> — combining the two makes ffmpeg re-run the whole <c>d</c>-frame
+    /// zoompan cycle once per demuxed input frame instead of once total). The chain instead bounds its
+    /// own frame count with a trailing <c>trim=end_frame=</c>, so it terminates on its own with no
+    /// external <c>-t</c>/<c>-frames:v</c> needed — required because this clip's stream feeds a
+    /// `concat` alongside others, not a standalone output.
+    /// <para/>
+    /// The source is first cover-fit to <see cref="KenBurnsHeadroom"/>× the output size (matching the
+    /// existing cover-fit crop, just larger) so <c>iw</c>/<c>ih</c> inside zoompan already match the
+    /// output aspect ratio — a centered zoom window then always covers without stretching. <c>x</c>/
+    /// <c>y</c> reference zoompan's own <c>zoom</c> variable (the just-evaluated <c>z</c> for that
+    /// frame) to place the window's top-left from the (also keyframed) pan center, clamped in-bounds.
+    /// </summary>
+    private static string ZoompanChain(Motion motion, double duration, int w, int h, int fps)
+    {
+        var kw = w * KenBurnsHeadroom;
+        var kh = h * KenBurnsHeadroom;
+        var frames = Math.Max(2, (int)Math.Round(duration * fps));
+        var denom = frames - 1;
+
+        string Lerp(double from, double to) =>
+            $"{FfmpegProcess.Fmt(from)}+{FfmpegProcess.Fmt(to - from)}*on/{denom}";
+
+        var zoomExpr = Lerp(Math.Max(motion.From.Zoom, 1), Math.Max(motion.To.Zoom, 1));
+        var xExpr = $"min(max(({Lerp(motion.From.PanX, motion.To.PanX)})*iw-(iw/zoom/2),0),iw-iw/zoom)";
+        var yExpr = $"min(max(({Lerp(motion.From.PanY, motion.To.PanY)})*ih-(ih/zoom/2),0),ih-ih/zoom)";
+
+        return $"scale={kw}:{kh}:force_original_aspect_ratio=increase,crop={kw}:{kh}," +
+               $"zoompan=z='{zoomExpr}':x='{xExpr}':y='{yExpr}':d={frames}:s={w}x{h}:fps={fps}," +
+               $"trim=end_frame={frames},setpts=PTS-STARTPTS,setsar=1";
     }
 }

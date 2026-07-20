@@ -1582,3 +1582,23 @@ input[type='range'] {
   color: var(--text);
   font: inherit;
 }
+
+/* Ken Burns from/to keyframe group within the transform inspector (Phase 5). */
+.tl-motion-keyframe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  width: 100%;
+  padding: 6px 0;
+  border-top: 1px dashed var(--border);
+}
+.tl-motion-keyframe:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.tl-motion-label {
+  font-weight: 600;
+  color: var(--text);
+  min-width: 34px;
+}

@@ -110,6 +110,31 @@ public record Clip
 
     /// <summary>Caption clips carry text; it is rasterized to an overlay at export (later phases).</summary>
     public string? Text { get; init; }
+
+    /// <summary>
+    /// Optional keyframed Ken Burns pan/zoom for a still (ignored for video sources): animates
+    /// linearly from <see cref="Motion.From"/> to <see cref="Motion.To"/> across the clip's full
+    /// duration via ffmpeg <c>zoompan</c>. Mutually exclusive with static <see cref="Crop"/>/<see
+    /// cref="Rotation"/> on the same clip — when animated (From != To), those are ignored for this
+    /// clip; identical From/To keyframes are a no-op and fall back to the static chain.
+    /// </summary>
+    public Motion? Motion { get; init; }
+}
+
+/// <summary>A single Ken Burns keyframe: punch-in factor + normalized (0–1) pan center.</summary>
+public record KenBurnsKeyframe
+{
+    /// <summary>1 = full frame, higher = zoomed in. Matches the static reframe control's range.</summary>
+    public double Zoom { get; init; } = 1;
+    public double PanX { get; init; } = 0.5;
+    public double PanY { get; init; } = 0.5;
+}
+
+/// <summary>Keyframed pan/zoom endpoints a clip animates between over its full duration.</summary>
+public record Motion
+{
+    public KenBurnsKeyframe From { get; init; } = new();
+    public KenBurnsKeyframe To { get; init; } = new();
 }
 
 /// <summary>

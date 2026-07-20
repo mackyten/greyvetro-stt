@@ -318,12 +318,36 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
          re-sync like video/music. Verified: backend 26/26 total, `tsc -b && vite
          build` + lint clean, and a real `/render` POST — a PiP pixel sampled
          background color outside its window and overlay color inside it.
-     - Remaining after Phase 3: Phase 5 (Ken Burns `zoompan`), Phase 6
-       (transitions `xfade`/`acrossfade`).
+     - ✅ **TL Phase 5 — Motion** (shipped 2026-07-20): Ken Burns pan/zoom on
+       stills via keyframed `Clip.Motion.From/To` (`{ zoom, panX, panY }`),
+       animated linearly across the clip's full duration by ffmpeg `zoompan`.
+       The recipe was verified empirically against ffmpeg 8.1 before wiring it
+       in — the pattern every other still uses (`-loop 1 -t <duration> -i`)
+       makes zoompan re-run its whole `d`-frame cycle **once per demuxed input
+       frame** (100 input frames × d=120 → 12,000 output frames); the fix is an
+       **unbounded** `-loop 1 -i` (no input-side `-t`) plus a trailing
+       `trim=end_frame=<d>,setpts=PTS-STARTPTS` **inside the filter graph** so
+       the clip's stream self-terminates (it feeds a shared `concat` alongside
+       other clips, not a standalone output — no external `-t`/`-frames:v` to
+       lean on; without the in-graph trim the render hangs forever). Source is
+       pre-cover-fit to 3× the output size (`KenBurnsHeadroom`, matches the
+       reframe control's `MAX_ZOOM`) so the crop window stays native-res even
+       at max zoom; `x`/`y` reference zoompan's own `zoom` variable, clamped
+       in-bounds. Stills only (video-source clips ignore Motion, keep their
+       `-ss`/`-t` trim); mutually exclusive with static `Crop`/`Rotation` on
+       the same clip (identical From/To is a no-op, falls back to the static
+       chain). Web: transform inspector's **🎥 Add motion** toggle swaps the
+       static Zoom/Pan/Tilt controls for paired Start/End keyframe editors;
+       live preview lerps zoom/pan by playhead position within the clip so
+       scrubbing shows the animation. Verified: backend 31/31 (5 new tests),
+       `tsc -b && vite build` + lint clean, and a real `/render` POST — a
+       4s/120-frame clip visibly zoomed + panned between first and last frame.
+     - Remaining after Phase 5: Phase 6 (transitions `xfade`/`acrossfade`,
+       timeline snapping/zoom, undo/redo history stack).
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
-     (the key already has `gemini-3-pro-image` / nano-banana access), Ken
-     Burns zoom, clip trimming, transitions, Flutter parity.
+     (the key already has `gemini-3-pro-image` / nano-banana access), clip
+     transitions, Flutter parity.
 
 ### Candidate additions
 - ✅ **Voice settings** — "Voice settings" card in the composer: **Stability**, **Similarity**, **Style** sliders + a **Speaker boost** toggle (on by default — strongest lever for cloned-voice likeness). All four flow through `TtsRequest` → `VoiceSettings`, are stored per gallery item, and restored on edit/regenerate. (Flutter still hardcodes `eleven_multilingual_v2`; the **web** frontend has a Model dropdown — v2 / Eleven v3 / Turbo / Flash — carried through `/tts` `modelId`, gallery items, and presets.)

@@ -59,6 +59,18 @@ export interface Clip {
 
   // Caption clips carry text; rasterized to an alpha overlay at export (Phase 3+).
   text?: string;
+
+  // Ken Burns pan/zoom (Phase 5) — animates linearly from `from` to `to` across the clip's full
+  // duration. Stills only (ignored by the backend for a video source). Mutually exclusive with a
+  // static crop/rotation on the same clip: when animated, those are ignored for export.
+  motion?: { from: KenBurns; to: KenBurns };
+}
+
+/** A single Ken Burns keyframe: punch-in factor + normalized (0–1) pan center. */
+export interface KenBurns {
+  zoom: number; // 1 = full frame, higher = zoomed in
+  panX: number;
+  panY: number;
 }
 
 export interface MediaAsset {

@@ -445,8 +445,32 @@ storyboard.
   re-sync too. Verified: backend 15/15, build/lint clean, 16/16 audio-ops
   assertions, and the exact `volume,afade,adelay,amix,apad` graph rendered by
   ffmpeg end-to-end (h264+aac, 9.0s master length).
-- **Phase 5 — Motion.** Ken Burns (`zoompan`) on photos via keyframed
-  `motion.from/to` (gated on §9).
+- ✅ **Phase 5 — Motion (shipped 2026-07-20).** Ken Burns pan/zoom on stills via keyframed
+  `Clip.Motion.From/To` (each a `{ zoom, panX, panY }`), animated linearly across the clip's full
+  duration by ffmpeg `zoompan`. The exact recipe was verified empirically against ffmpeg 8.1 before
+  wiring it into the compiler (three dead ends first): `-loop 1 -t <duration> -i` (the pattern every
+  other still uses) makes zoompan re-run its whole `d`-frame cycle **once per demuxed input frame**
+  (100 input frames × d=120 → 12,000 output frames) — the fix is an **unbounded** `-loop 1 -i` (no
+  input-side `-t`) so zoompan consumes exactly one input frame and produces `d` frames from it, self-
+  terminating via a trailing `trim=end_frame=<d>,setpts=PTS-STARTPTS` **inside the filter graph**
+  (an external `-t`/`-frames:v` isn't an option here — this clip's stream feeds a shared `concat`
+  alongside others, not a standalone output; without the in-graph trim it never emits EOF and the
+  whole render hangs). The source is pre-cover-fit to 3× the output size (`KenBurnsHeadroom`) before
+  zoompan so the crop window stays at native resolution even at max zoom (matches the existing
+  reframe control's `MAX_ZOOM=3`); `x`/`y` reference zoompan's own `zoom` variable (current frame's
+  evaluated `z`) to place the pan center, clamped in-bounds with `min`/`max`. Motion is stills-only —
+  a video-source clip keeps its normal `-ss`/`-t` trim, Motion is ignored — and mutually exclusive
+  with static `Crop`/`Rotation` on the same clip (identical `From`/`To` keyframes are a no-op that
+  falls back to the cheaper static chain; an animated clip's static crop/rotation are ignored, not
+  combined — later refinement if ever needed). Web: the per-clip transform inspector gained a
+  **🎥 Add motion** toggle that swaps the static Zoom/Pan/Tilt controls for paired **Start**/**End**
+  keyframe editors (`setMotion`/`DEFAULT_MOTION` in `timelineOps.ts`); the live preview lerps
+  zoom/pan by the playhead's position within the clip (`(ph - startTime) / duration`, clamped 0–1) so
+  scrubbing shows the animation, reusing the same CSS-transform preview path as the static reframe
+  (motion takes precedence when both are present, mirroring the compiler). Verified: backend 31/31
+  (5 new tests — lerped zoompan expressions, the no-`-t` input args, the identical-keyframe no-op
+  fallback, a video-source clip ignoring Motion), `tsc -b && vite build` + lint clean, and a real
+  `/render` POST — a 4s/120-frame clip visibly zoomed + panned between its first and last frame.
 - **Phase 6 — Transitions + polish.** `xfade`/`acrossfade` (gated on §9),
   timeline snapping/zoom, undo/redo history stack.
 - **Later / separate scope — Video-clip ingestion.** Upload real video as source
