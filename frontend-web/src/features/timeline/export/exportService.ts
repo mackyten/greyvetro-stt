@@ -14,8 +14,10 @@ import { getAsset } from '../timelineAssetRepo';
  * full-frame image *without* captions. From TL Phase 3 on, captions are their own alpha-overlay
  * track (docs/timeline-editor-plan.md §5): each caption clip rasterizes to a transparent PNG the
  * backend composites via `overlay`, so the underlying image can later crop/scale independently.
- * The voiceover packs under its stable asset id; the structured timeline + these blobs POST to
- * /render, where the backend compiler builds the ffmpeg graph.
+ * The voiceover packs under its stable asset id; overlay (PiP/logo) images and per-clip
+ * crop/rotation/position/scale travel as plain Timeline metadata (Phase 3b/3c) — only the raw
+ * blobs need packing here, the backend compiler does the transform math. The structured timeline +
+ * these blobs POST to /render, where the backend compiler builds the ffmpeg graph.
  */
 export async function exportTimelineVideo(
   timeline: Timeline,
@@ -56,6 +58,14 @@ export async function exportTimelineVideo(
   // Music/SFX the user added (the voiceover is already packed above under its own id).
   for (const asset of timeline.assets) {
     if (asset.type !== 'audio' || asset.id === VOICEOVER_ASSET_ID) continue;
+    const blob = await getAsset(asset.id);
+    if (blob) assets[asset.id] = blob;
+  }
+
+  // Overlay (PiP/logo) images the user added — any image asset not already packed above as a
+  // storyboard scene frame, stored in timelineAssetRepo like video/music.
+  for (const asset of timeline.assets) {
+    if (asset.type !== 'image' || assets[asset.id]) continue;
     const blob = await getAsset(asset.id);
     if (blob) assets[asset.id] = blob;
   }

@@ -275,7 +275,7 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        Verified: backend 15/15, build/lint clean, 16/16 audio-ops assertions, and
        the exact `volume,afade,adelay,amix,apad` graph rendered by ffmpeg
        end-to-end (h264+aac, 9.0s master length).
-     - 🚧 **TL Phase 3 — Layering + transform** (in progress; sliced 3a→3b→3c):
+     - ✅ **TL Phase 3 — Layering + transform** (sliced 3a→3b→3c, all shipped):
        - ✅ **3a — Caption alpha-overlay split** (2026-07-18): captions are no
          longer fused into the photo frames. Each caption clip rasterizes to a
          **transparent full-frame PNG** (`captions/drawCaption.ts`
@@ -290,10 +290,34 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
          t=1 and absent at t=3 (frame-sampled). Backend 18/18, `tsc -b && vite
          build` clean. **This unblocks transforms** — the image can now move
          independently of the text.
-       - **3b — Per-clip transform** (crop/scale/position/rotation + inspector):
-         not started.
-       - **3c — Layering** (2nd visual track + z-index via chained `overlay`):
-         not started.
+       - ✅ **3b — Per-clip transform.** Reframe (zoom/pan, via `Clip.Crop`) shipped
+         first — a normalized source crop before the cover-fit, a Zoom + Pan X/Y
+         inspector, an approximate CSS preview. *(Landed in the same commit as the
+         `@greyvetro/ui` design-system work below, under a message that only
+         described the latter.)* **Rotation** (`Clip.Rotation`, degrees, shipped
+         2026-07-20) closed out the phase: the compiler auto-computes the smallest
+         uniform zoom that keeps a tilted frame gap-free (`k = cosθ + (H/W)·sinθ`)
+         before `scale=k·w:k·h,rotate=θ*PI/180:ow=w:oh=h` crops back down — no black
+         corners at any angle the ±45° Tilt slider allows. Verified: +6 golden-string
+         tests, and a real `/render` POST — every corner of a 15°-tilted frame
+         sampled solid background color.
+       - ✅ **3c — Layering** (shipped 2026-07-20): any photo/video track above the
+         base zIndex composites as a PiP/logo-style `overlay` — scaled to a
+         normalized `Clip.Scale` (aspect kept via ffmpeg `-2`), placed at a
+         normalized `Clip.Position`, gated to its window, ordered by zIndex, under
+         the caption layer (its inputs land right after audio, captions after
+         those — no existing stream-index test moved). Web: **🖼 Add overlay** on
+         the Timeline tab adds an image as its own track (default: spans the whole
+         timeline, a persistent watermark); selecting it opens a Position X/Y +
+         Size inspector and the preview composites it live. Overlay clips edit like
+         music (one clip, end-trim only, removed as a whole track) since they don't
+         join the base `concat` — `timelineOps.ts` now distinguishes the base
+         visual track from overlay tracks by zIndex throughout (`reanchor`/
+         `moveClip`/`splitClip`/`deleteClip`/`visualEnd`/the "keep one clip" guard
+         are all base-only), and `mergeAddedMedia` carries overlay tracks across a
+         re-sync like video/music. Verified: backend 26/26 total, `tsc -b && vite
+         build` + lint clean, and a real `/render` POST — a PiP pixel sampled
+         background color outside its window and overlay color inside it.
      - Remaining after Phase 3: Phase 5 (Ken Burns `zoompan`), Phase 6
        (transitions `xfade`/`acrossfade`).
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation

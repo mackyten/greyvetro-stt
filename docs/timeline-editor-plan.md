@@ -381,10 +381,10 @@ storyboard.
   new xUnit test locks that a split (two clips over one source) emits an input
   per clip. Captions stay fused this phase (overlay split is Phase 3). Verified:
   backend 12/12, `tsc -b && vite build` clean, 20/20 pure-ops assertions.
-- 🚧 **Phase 3 — Layering + transform (captions split here).** Add/remove tracks,
-  z-index layering in preview + compiler, crop/position/scale on the selected
-  clip. **Captions move to their own alpha-overlay track now** (§5), because
-  images start transforming independently. Being built in three slices:
+- ✅ **Phase 3 — Layering + transform (captions split here).** Add/remove tracks,
+  z-index layering in preview + compiler, crop/position/scale/rotation on the
+  selected clip. **Captions moved to their own alpha-overlay track** (§5),
+  because images now transform independently. Shipped in three slices:
   - ✅ **3a — Caption alpha-overlay split (shipped 2026-07-18).** `drawCaption` was
     extracted from `storyboard/composite.ts` into a shared `captions/drawCaption.ts`
     (with `renderCaptionOverlay`, which rasterizes a caption clip to a transparent
@@ -396,11 +396,41 @@ storyboard.
     intact — with no caption PNGs it maps `[vout]` exactly as before. Verified with
     a real `/render` POST (h264/aac 1080×1920, caption box present at t=1, absent at
     t=3, frame-sampled). Backend 18/18, `tsc -b && vite build` clean. Unblocks 3b.
-  - **3b — Per-clip transform.** crop/position/scale/rotation on the selected clip
-    (normalized 0–1 → `crop`/`scale`/`overlay` in the compiler) + an inspector +
-    preview. Not started.
-  - **3c — Layering.** Add/remove tracks, a 2nd visual track, z-index ordering via
-    chained `overlay` in preview + compiler. Not started.
+  - ✅ **3b — Per-clip transform (shipped 2026-07-20).** Reframe (zoom/pan) landed
+    first, via the already-modeled `Clip.Crop`: a normalized source crop applied
+    before the cover-fit (`CropPrefix` in `FilterGraphCompiler`), a Zoom + Pan X/Y
+    inspector (`cropFromZoomPan`/`zoomPanFromCrop` in `timelineOps.ts`), and an
+    approximate CSS preview. *(That slice shipped in the same commit as the
+    `@greyvetro/ui` design-system work, under a message that only described the
+    latter — worth knowing if you go looking for it in history.)* Rotation
+    (`Clip.Rotation`, degrees) closed out the phase: the compiler auto-computes the
+    smallest uniform zoom that keeps a tilted W×H frame gap-free —
+    `k = cos θ + (H/W)·sin θ` — before `scale=k·w:k·h,rotate=θ*PI/180:ow=w:oh=h`
+    crops back down, so no black corners appear at any angle the ±45° Tilt slider
+    allows. Verified: backend +6 golden-string tests, and a real `/render` POST —
+    every corner (and center) of a 15°-tilted frame sampled solid background color,
+    no black.
+  - ✅ **3c — Layering (shipped 2026-07-20).** Any photo/video track above the base
+    zIndex composites as a PiP/logo-style overlay: scaled to a normalized
+    `Clip.Scale` (source aspect kept via ffmpeg `-2`), placed at a normalized
+    `Clip.Position`, gated `enable='between(t,start,end)'`, ordered by zIndex —
+    under the caption layer (overlay inputs land right after audio, captions after
+    those, so none of the existing stream-index golden tests moved). Web: **🖼 Add
+    overlay** on the Timeline tab adds an image as its own track (one clip
+    spanning the current timeline length by default, a persistent-watermark
+    default); selecting it opens a Position X/Y + Size inspector, and the live
+    preview composites it over the background frame. Overlay clips are edited like
+    music — one clip, end-trim only, removed as a whole track — since they don't
+    join the base track's `concat`; `timelineOps.ts` now distinguishes the base
+    visual track from overlay tracks by zIndex throughout
+    (`reanchor`/`moveClip`/`splitClip`/`deleteClip`, `visualEnd`, and the "keep at
+    least one clip" guard are all scoped to the base only, so an overlay can't
+    block deleting the last scene or skew where an appended video lands).
+    `mergeAddedMedia` carries overlay tracks across a storyboard re-sync, same as
+    video/music. Verified: backend 26/26 total (8 new tests across 3b/3c),
+    `tsc -b && vite build` + lint clean, and a real `/render` POST — a PiP pixel
+    sampled background color before its window, overlay color inside it, and
+    background color again after.
 - ✅ **Phase 4 — Audio (shipped 2026-07-18, ahead of Phase 3 per the "light
   editing" priority).** Multiple audio tracks (voiceover + music/SFX), per-track
   volume/mute, fade in/out. The compiler grew a mix path: each unmuted audio clip

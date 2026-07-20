@@ -560,4 +560,171 @@ public class FilterGraphCompilerTests
         // A full-frame crop must not emit a crop=iw*… prefix (keeps the un-transformed graph).
         Assert.DoesNotContain("iw*", Norm(plan.FilterComplex));
     }
+
+    // --- Per-clip rotation (Phase 3b) ---
+
+    [Fact]
+    public void Compile_ClipWithRotation_InsertsAutoZoomAndRotateAfterCoverFit()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[0] = clips[0] with { Rotation = 20 };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Auto-zoom (k ≈ 1.5477 for 20° on a 1080x1920 canvas) keeps the rotated frame gap-free,
+        // then rotate crops back down to the canvas size.
+        Assert.Contains(
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
+            "scale=1672:2972,rotate=20*PI/180:ow=1080:oh=1920:c=black,setsar=1,fps=30[v0]",
+            Norm(plan.FilterComplex));
+        // Un-rotated clips stay byte-identical.
+        Assert.Contains(
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1]",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_ClipWithNegativeRotation_ZoomsBySameMagnitude_ButSignsTheAngle()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[0] = clips[0] with { Rotation = -15 };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains(
+            "crop=1080:1920,scale=1541:2739,rotate=-15*PI/180:ow=1080:oh=1920:c=black,setsar=1",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_ClipWithZeroRotation_IsANoOp()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[0] = clips[0] with { Rotation = 0 };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.DoesNotContain("rotate=", Norm(plan.FilterComplex));
+    }
+
+    // --- Overlay visual layers / z-index layering (Phase 3c) ---
+
+    private static (Timeline, Dictionary<string, string>) OverlayCase()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        timeline = timeline with
+        {
+            Tracks =
+            [
+                .. timeline.Tracks,
+                new Track
+                {
+                    Id = "logo", Type = TrackType.Photo, ZIndex = 1,
+                    Clips =
+                    [
+                        new Clip
+                        {
+                            Id = "ov0", SourceId = "logo-img", StartTime = 1, Duration = 3,
+                            Position = new NormalizedPoint { X = 0.65, Y = 0.05 }, Scale = 0.3,
+                        },
+                    ],
+                },
+            ],
+        };
+        paths = new Dictionary<string, string>(paths) { ["logo-img"] = "/tmp/logo.png" };
+        return (timeline, paths);
+    }
+
+    [Fact]
+    public void Compile_OverlayVisualTrack_CompositesAbovetheBaseConcat_AndMapsVov()
+    {
+        var (timeline, paths) = OverlayCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Overlay input is appended after the (single) audio input.
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "2.5", "-i", "/tmp/a.jpg",
+                "-loop", "1", "-t", "3.5", "-i", "/tmp/b.jpg",
+                "-loop", "1", "-t", "4.5", "-i", "/tmp/c.jpg",
+                "-i", "/tmp/voice.mp3",
+                "-i", "/tmp/logo.png",
+            },
+            plan.InputArgs);
+
+        // Scaled to 30% of the 1080-wide canvas (324px), placed at its normalized position
+        // (0.65*1080=702, 0.05*1920=96), gated to [1, 1+3].
+        Assert.Contains("[4:v]scale=324:-2,setsar=1[ovl0]", Norm(plan.FilterComplex));
+        Assert.Contains("[vout][ovl0]overlay=702:96:enable='between(t,1,4)'[vov]", Norm(plan.FilterComplex));
+
+        var maps = plan.OutputArgs.ToList();
+        Assert.Equal("[vov]", maps[maps.IndexOf("-map") + 1]);
+    }
+
+    [Fact]
+    public void Compile_OverlayAndCaptions_CaptionsCompositeOnTopOfTheOverlay()
+    {
+        var (timeline, paths) = OverlayCase();
+        timeline = timeline with
+        {
+            Tracks =
+            [
+                .. timeline.Tracks,
+                new Track
+                {
+                    Id = "caption", Type = TrackType.Caption, ZIndex = 2,
+                    Clips = [new Clip { Id = "cap0", SourceId = "img-0", StartTime = 0, Duration = 2.5, Text = "hi" }],
+                },
+            ],
+        };
+        var captionPaths = new Dictionary<string, string> { ["cap0"] = "/tmp/cap0.png" };
+
+        var plan = _compiler.Compile(timeline, paths, captionPaths);
+
+        // Input order: base visuals, audio, overlay logo, THEN the caption PNG (index 5).
+        Assert.Equal(
+            new[]
+            {
+                "-y",
+                "-loop", "1", "-t", "2.5", "-i", "/tmp/a.jpg",
+                "-loop", "1", "-t", "3.5", "-i", "/tmp/b.jpg",
+                "-loop", "1", "-t", "4.5", "-i", "/tmp/c.jpg",
+                "-i", "/tmp/voice.mp3",
+                "-i", "/tmp/logo.png",
+                "-i", "/tmp/cap0.png",
+            },
+            plan.InputArgs);
+
+        // Overlay composites onto the base concat first...
+        Assert.Contains("[vout][ovl0]overlay=702:96:enable='between(t,1,4)'[vov]", Norm(plan.FilterComplex));
+        // ...then the caption composites on top of THAT result, not the raw base.
+        Assert.Contains("[vov][5:v]overlay=0:0:enable='between(t,0,2.5)'[vcap]", Norm(plan.FilterComplex));
+
+        var maps = plan.OutputArgs.ToList();
+        Assert.Equal("[vcap]", maps[maps.IndexOf("-map") + 1]);
+    }
+
+    [Fact]
+    public void Compile_NoOverlayTrack_IsANoOp_MapsVout()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.DoesNotContain("[ovl", Norm(plan.FilterComplex));
+        var maps = plan.OutputArgs.ToList();
+        Assert.Equal("[vout]", maps[maps.IndexOf("-map") + 1]);
+    }
 }

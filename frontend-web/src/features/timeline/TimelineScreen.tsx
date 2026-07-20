@@ -7,7 +7,7 @@ import { getSceneImage, listScenes } from '../storyboard/sceneRepo';
 import { exportTimelineVideo } from './export/exportService';
 import { audioDuration, capturePoster, probeVideo } from './media';
 import { seedTimelineFromScenes } from './model/seed';
-import { addMusic, appendVideoClip, mergeAddedMedia } from './model/timelineOps';
+import { addMusic, addOverlayImage, appendVideoClip, mergeAddedMedia } from './model/timelineOps';
 import type { Timeline } from './model/types';
 import { getAsset, saveAsset } from './timelineAssetRepo';
 import { getTimeline, saveTimeline } from './timelineRepo';
@@ -34,6 +34,7 @@ export function TimelineScreen() {
   const audioRef = useRef<Blob | null>(null);
   const videoInput = useRef<HTMLInputElement | null>(null);
   const musicInput = useRef<HTMLInputElement | null>(null);
+  const overlayInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     listProjects().then((list) => {
@@ -94,6 +95,14 @@ export function TimelineScreen() {
         if (!blob) continue;
         const poster = await capturePoster(blob);
         if (poster) map[asset.id] = URL.createObjectURL(poster);
+      }
+
+      // Overlay (PiP/logo) image thumbnails — any image asset not already loaded above as a
+      // storyboard scene (those are user-added overlays, stored in timelineAssetRepo).
+      for (const asset of tl.assets) {
+        if (asset.type !== 'image' || map[asset.id]) continue;
+        const blob = await getAsset(asset.id);
+        if (blob) map[asset.id] = URL.createObjectURL(blob);
       }
 
       if (cancelled) {
@@ -177,6 +186,26 @@ export function TimelineScreen() {
       toast(`Music added — ${dur.toFixed(1)}s. Select it on the timeline to set volume/fades.`);
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not add music.', 'error');
+    }
+  };
+
+  const addOverlay = () => overlayInput.current?.click();
+
+  const onOverlayFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !timeline || !projectId) return;
+    try {
+      const assetId = `ovl-${Date.now()}`;
+      await saveAsset({ id: assetId, projectId, type: 'image', blob: file });
+      const next = addOverlayImage(timeline, assetId);
+      await saveTimeline(next);
+      const url = URL.createObjectURL(file);
+      setImageUrls((m) => ({ ...m, [assetId]: url }));
+      setTimeline(next);
+      toast('Overlay added — select it on the timeline to position/resize.');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not add that image.', 'error');
     }
   };
 
@@ -270,6 +299,9 @@ export function TimelineScreen() {
             <button className="chip" onClick={addMusicFile}>
               🎵 Add music
             </button>
+            <button className="chip" onClick={addOverlay}>
+              🖼 Add overlay
+            </button>
             <button className="chip" disabled={exporting} onClick={exportVideo}>
               {exporting ? 'Rendering…' : '⬇ Export mp4'}
             </button>
@@ -318,6 +350,13 @@ export function TimelineScreen() {
         accept="audio/*"
         style={{ display: 'none' }}
         onChange={onMusicFile}
+      />
+      <input
+        ref={overlayInput}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={onOverlayFile}
       />
     </>
   );

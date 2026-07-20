@@ -1353,6 +1353,13 @@ input[type='range'] {
   line-height: 1.3;
   text-align: center;
 }
+.tl-preview .tl-preview-overlay {
+  position: absolute;
+  height: auto;
+  object-fit: contain;
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
 
 .tl-tools {
   display: flex;
@@ -1538,6 +1545,11 @@ input[type='range'] {
 /* Music clip (distinct from the voiceover gradient). */
 .tl-clip-music {
   background: #6c86d6;
+}
+
+/* Overlay (PiP/logo) clip — distinct from the base photo/video track it shares a lane type with. */
+.tl-clip-overlay {
+  background: #a56ce0;
 }
 
 /* Audio inspector shown when a music clip is selected. */

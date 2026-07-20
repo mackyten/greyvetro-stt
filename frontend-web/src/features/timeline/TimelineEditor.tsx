@@ -3,12 +3,16 @@ import { VOICEOVER_ASSET_ID } from './model/seed';
 import {
   cropFromZoomPan,
   deleteClip,
+  isOverlayTrack,
+  MAX_ROTATION,
   MAX_ZOOM,
   MIN_CLIP,
   moveClip,
   removeTrack,
   setClipFade,
   setCrop,
+  setOverlayTransform,
+  setRotation,
   setTrackAudio,
   splitClip,
   trimClip,
@@ -53,10 +57,12 @@ interface TrimDrag {
 }
 
 /**
- * Interactive timeline (Greyvetro Studio Phase 5, Phase 2). Each track is a lane, each clip a
- * bar. Visual clips can be selected, dragged to reorder, trimmed at either edge, split at the
- * playhead, and deleted; the model stays contiguous (the base track is a concat). Edits are pure
- * (see model/timelineOps.ts) and flow up via onChange for persistence + render.
+ * Interactive timeline (Greyvetro Studio Phase 5). Each track is a lane, each clip a bar. Base
+ * visual clips can be selected, dragged to reorder, trimmed at either edge, split at the playhead,
+ * reframed (zoom/pan) and tilted (rotation), and deleted; the model stays contiguous (the base
+ * track is a `concat`). Overlay (PiP/logo) tracks — a photo/video track above the base zIndex,
+ * Phase 3c — float freely: one clip, end-trim only, positioned/scaled via its own inspector, like
+ * music. Edits are pure (see model/timelineOps.ts) and flow up via onChange for persistence + render.
  */
 export function TimelineEditor({
   timeline,
@@ -136,10 +142,12 @@ export function TimelineEditor({
   const tracks = [...timeline.tracks].sort(
     (a, b) => LANE_ORDER.indexOf(a.type) - LANE_ORDER.indexOf(b.type),
   );
+  const overlay = (trackId: string) => isOverlayTrack(timeline, trackId);
 
-  // Flattened visual clips in play order (for the preview + guards).
+  // Flattened BASE visual clips in play order (drives the background preview + the "keep at least
+  // one" guard). Overlay (PiP/logo) clips are excluded — they composite on top, not as the frame.
   const visualClips = timeline.tracks
-    .filter((t) => isVisualType(t.type))
+    .filter((t) => isVisualType(t.type) && !overlay(t.id))
     .flatMap((t) => t.clips)
     .sort((a, b) => a.startTime - b.startTime);
   const visualCount = visualClips.length;
@@ -147,29 +155,36 @@ export function TimelineEditor({
   const selectedClip = selected
     ? timeline.tracks.flatMap((t) => t.clips).find((c) => c.id === selected) ?? null
     : null;
-  const selectedIsVisual =
-    !!selectedClip &&
-    isVisualType(timeline.tracks.find((t) => t.clips.some((c) => c.id === selected))?.type ?? 'audio');
-  const localPlayhead = selectedClip ? ph - selectedClip.startTime : 0;
-
-  // A selected music clip (an audio clip that isn't the seeded voiceover) opens the audio inspector.
   const selTrack = selected
     ? timeline.tracks.find((t) => t.clips.some((c) => c.id === selected)) ?? null
     : null;
+  const selectedIsVisual = !!selectedClip && !!selTrack && isVisualType(selTrack.type) && !overlay(selTrack.id);
+  const localPlayhead = selectedClip ? ph - selectedClip.startTime : 0;
+
+  // A selected music clip (an audio clip that isn't the seeded voiceover) opens the audio inspector.
   const selMusic =
     selTrack && selectedClip && selTrack.type === 'audio' && selectedClip.sourceId !== VOICEOVER_ASSET_ID
+      ? { track: selTrack, clip: selectedClip }
+      : null;
+  // A selected overlay (PiP/logo) clip opens the position/scale inspector.
+  const selOverlay =
+    selTrack && selectedClip && isVisualType(selTrack.type) && overlay(selTrack.id)
       ? { track: selTrack, clip: selectedClip }
       : null;
 
   const canSplit =
     selectedIsVisual && localPlayhead > MIN_CLIP && localPlayhead < (selectedClip?.duration ?? 0) - MIN_CLIP;
-  const canDelete = (selectedIsVisual && visualCount > 1) || !!selMusic;
+  const canDelete = (selectedIsVisual && visualCount > 1) || !!selMusic || !!selOverlay;
 
   const onDelete = () => {
     if (!selected) return;
     if (selMusic) {
       stop();
       onChange(removeTrack(timeline, selMusic.track.id));
+      setSelected(null);
+    } else if (selOverlay) {
+      stop();
+      onChange(removeTrack(timeline, selOverlay.track.id));
       setSelected(null);
     } else if (selectedIsVisual && visualCount > 1) {
       stop();
@@ -181,21 +196,32 @@ export function TimelineEditor({
   const onDeleteRef = useRef(onDelete);
   onDeleteRef.current = onDelete;
 
-  // Frame shown in the preview: the visual clip under the playhead, plus any active caption. While
-  // paused with a visual clip selected, the preview locks to that clip so reframe edits are WYSIWYG.
+  // Frame shown in the preview: the base visual clip under the playhead, plus any active caption.
+  // While paused with a base clip selected, the preview locks to that clip so reframe edits are
+  // WYSIWYG. Overlay (PiP/logo) clips active at the playhead composite on top, positioned/scaled.
   const activeVisual = visualClips.find((c) => ph >= c.startTime && ph < c.startTime + c.duration)
     ?? visualClips[visualClips.length - 1];
   const previewClip = !playing && selectedIsVisual && selectedClip ? selectedClip : activeVisual;
   const activeCaption = timeline.tracks
     .find((t) => t.type === 'caption')
     ?.clips.find((c) => ph >= c.startTime && ph < c.startTime + c.duration)?.text;
+  const activeOverlays = timeline.tracks
+    .filter((t) => isVisualType(t.type) && overlay(t.id))
+    .flatMap((t) => t.clips)
+    .filter((c) => ph >= c.startTime && ph < c.startTime + c.duration);
 
-  // Reflect a clip's crop/reframe in the preview as a CSS zoom into its pan-center (approximate —
-  // the exact source-crop cover-fit happens at export; §4 preview is for feedback, not parity).
-  const cropStyle = previewClip?.crop
+  // Reflect a clip's crop/reframe + tilt in the preview via CSS (approximate — the exact
+  // source-crop cover-fit + auto-zoomed rotation happens at export; §4 preview is for feedback,
+  // not pixel parity).
+  const previewTransform: string[] = [];
+  if (previewClip?.crop) previewTransform.push(`scale(${(1 / previewClip.crop.width).toFixed(4)})`);
+  if (previewClip?.rotation) previewTransform.push(`rotate(${previewClip.rotation}deg)`);
+  const cropStyle = previewTransform.length
     ? {
-        transform: `scale(${(1 / previewClip.crop.width).toFixed(4)})`,
-        transformOrigin: `${((previewClip.crop.x + previewClip.crop.width / 2) * 100).toFixed(2)}% ${((previewClip.crop.y + previewClip.crop.height / 2) * 100).toFixed(2)}%`,
+        transform: previewTransform.join(' '),
+        transformOrigin: previewClip?.crop
+          ? `${((previewClip.crop.x + previewClip.crop.width / 2) * 100).toFixed(2)}% ${((previewClip.crop.y + previewClip.crop.height / 2) * 100).toFixed(2)}%`
+          : '50% 50%',
       }
     : undefined;
 
@@ -205,6 +231,14 @@ export function TimelineEditor({
     if (!selectedClip) return;
     // Zoom back to 1 clears the crop (full frame); otherwise store the derived rect.
     onChange(setCrop(timeline, selectedClip.id, zoom <= 1.001 ? null : cropFromZoomPan(zoom, panX, panY)));
+  };
+  const applyRotation = (degrees: number) => {
+    if (!selectedClip) return;
+    onChange(setRotation(timeline, selectedClip.id, degrees));
+  };
+  const applyOverlayTransform = (patch: { position?: { x: number; y: number }; scale?: number }) => {
+    if (!selOverlay) return;
+    onChange(setOverlayTransform(timeline, selOverlay.clip.id, patch));
   };
 
   // Split / delete keyboard shortcuts.
@@ -264,6 +298,21 @@ export function TimelineEditor({
           ) : (
             <div className="tl-preview-empty">🎬</div>
           )}
+          {activeOverlays.map((c) =>
+            imageUrls[c.sourceId] ? (
+              <img
+                key={c.id}
+                className="tl-preview-overlay"
+                src={imageUrls[c.sourceId]}
+                alt=""
+                style={{
+                  left: `${(c.position?.x ?? 0) * 100}%`,
+                  top: `${(c.position?.y ?? 0) * 100}%`,
+                  width: `${(c.scale ?? 0.3) * 100}%`,
+                }}
+              />
+            ) : null,
+          )}
           {activeCaption && <div className="tl-preview-caption">{activeCaption}</div>}
         </div>
 
@@ -285,12 +334,12 @@ export function TimelineEditor({
               ✂ Split
             </button>
             <button className="chip" disabled={!canDelete} onClick={onDelete}>
-              {selMusic ? '🗑 Remove music' : '🗑 Delete'}
+              {selMusic ? '🗑 Remove music' : selOverlay ? '🗑 Remove overlay' : '🗑 Delete'}
             </button>
           </div>
           <div className="tl-tools-meta mono">
             Playhead {ph.toFixed(1)}s / {total.toFixed(1)}s
-            {selectedClip && (selectedIsVisual || selMusic) && (
+            {selectedClip && (selectedIsVisual || selMusic || selOverlay) && (
               <> · selected {selectedClip.duration.toFixed(1)}s</>
             )}
           </div>
@@ -384,19 +433,71 @@ export function TimelineEditor({
                   onChange={(e) => applyCrop(zoomPan.zoom, zoomPan.panX, Number(e.target.value))}
                 />
               </label>
+              <label>
+                Tilt
+                <input
+                  type="range"
+                  min={-MAX_ROTATION}
+                  max={MAX_ROTATION}
+                  step={1}
+                  value={selectedClip.rotation ?? 0}
+                  onChange={(e) => applyRotation(Number(e.target.value))}
+                />
+                <span className="mono">{(selectedClip.rotation ?? 0).toFixed(0)}°</span>
+              </label>
               <button
                 className="chip"
-                disabled={!selectedClip.crop}
-                onClick={() => onChange(setCrop(timeline, selectedClip.id, null))}
+                disabled={!selectedClip.crop && !selectedClip.rotation}
+                onClick={() => {
+                  onChange(setCrop(timeline, selectedClip.id, null));
+                  applyRotation(0);
+                }}
               >
                 Reset framing
               </button>
             </div>
+          ) : selOverlay ? (
+            <div className="tl-transform-inspector">
+              <label>
+                Pos X
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.02}
+                  value={selOverlay.clip.position?.x ?? 0}
+                  onChange={(e) => applyOverlayTransform({ position: { x: Number(e.target.value), y: selOverlay.clip.position?.y ?? 0 } })}
+                />
+              </label>
+              <label>
+                Pos Y
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.02}
+                  value={selOverlay.clip.position?.y ?? 0}
+                  onChange={(e) => applyOverlayTransform({ position: { x: selOverlay.clip.position?.x ?? 0, y: Number(e.target.value) } })}
+                />
+              </label>
+              <label>
+                Size
+                <input
+                  type="range"
+                  min={0.1}
+                  max={0.9}
+                  step={0.02}
+                  value={selOverlay.clip.scale ?? 0.3}
+                  onChange={(e) => applyOverlayTransform({ scale: Number(e.target.value) })}
+                />
+                <span className="mono">{Math.round((selOverlay.clip.scale ?? 0.3) * 100)}%</span>
+              </label>
+            </div>
           ) : (
             <div className="tl-tools-hint">
               Click a clip to select · drag to reorder · drag an edge to trim · click the ruler to
-              move the playhead, then Split (S) or Delete. Select a scene to reframe (zoom/pan); add
-              music, select it to set volume/fades.
+              move the playhead, then Split (S) or Delete. Select a scene to reframe (zoom/pan/tilt);
+              add music or an overlay, select it to adjust.
             </div>
           )}
         </div>
@@ -416,7 +517,7 @@ export function TimelineEditor({
 
       {tracks.map((track) => (
         <div key={track.id} className="tl-lane">
-          <div className="tl-lane-label">{LANE_LABEL[track.type]}</div>
+          <div className="tl-lane-label">{overlay(track.id) ? '🖼 Overlay' : LANE_LABEL[track.type]}</div>
           <div
             className="tl-lane-track"
             onPointerDown={(e) => {
@@ -433,6 +534,7 @@ export function TimelineEditor({
                   clip={clip}
                   index={i}
                   track={track}
+                  overlay={overlay(track.id)}
                   total={total}
                   thumb={imageUrls[clip.sourceId]}
                   selected={selected === clip.id}
@@ -440,7 +542,7 @@ export function TimelineEditor({
                   trim={trim?.clipId === clip.id ? trim : null}
                   onSelect={() => setSelected(clip.id)}
                   onDragStart={() => {
-                    if (isVisualType(track.type)) dragId.current = clip.id;
+                    if (isVisualType(track.type) && !overlay(track.id)) dragId.current = clip.id;
                   }}
                   onDragOver={() => {
                     if (dragId.current && dragId.current !== clip.id) setDropTarget(clip.id);
@@ -483,6 +585,7 @@ function ClipBar({
   clip,
   index,
   track,
+  overlay,
   total,
   thumb,
   selected,
@@ -497,6 +600,8 @@ function ClipBar({
   clip: Clip;
   index: number;
   track: Track;
+  /** True when this clip's track is an overlay (PiP/logo) layer, not the base concat. */
+  overlay: boolean;
   total: number;
   thumb?: string;
   selected: boolean;
@@ -508,14 +613,17 @@ function ClipBar({
   onDrop: () => void;
   onTrimStart: (edge: 'start' | 'end', e: React.PointerEvent) => void;
 }) {
-  const visual = isVisualType(track.type);
+  // Part of the contiguous base concat (reorderable, trims both edges) — as opposed to an
+  // overlay clip, which floats freely and only trims its end (like music).
+  const base = isVisualType(track.type) && !overlay;
   const music = track.type === 'audio' && clip.sourceId !== VOICEOVER_ASSET_ID;
-  const editable = visual || music;
+  const editable = base || overlay || music;
   const duration = trim ? trim.duration : clip.duration;
   const left = (clip.startTime / total) * 100;
   const width = (duration / total) * 100;
-  const label =
-    track.type === 'caption'
+  const label = overlay
+    ? '🖼 Overlay'
+    : track.type === 'caption'
       ? clip.text ?? ''
       : track.type === 'audio'
         ? music
@@ -527,29 +635,29 @@ function ClipBar({
 
   return (
     <div
-      className={`tl-clip tl-clip-${track.type}${music ? ' tl-clip-music' : ''}${selected ? ' selected' : ''}${dropTarget ? ' drop-target' : ''}${editable ? ' editable' : ''}`}
+      className={`tl-clip tl-clip-${track.type}${music ? ' tl-clip-music' : ''}${overlay ? ' tl-clip-overlay' : ''}${selected ? ' selected' : ''}${dropTarget ? ' drop-target' : ''}${editable ? ' editable' : ''}`}
       style={{ left: `${left}%`, width: `${width}%` }}
       title={`${label} · ${fmt(clip.startTime)}–${fmt(clip.startTime + duration)}`}
-      draggable={visual}
+      draggable={base}
       onClick={() => editable && onSelect()}
       onDragStart={onDragStart}
       onDragOver={(e) => {
-        if (visual) {
+        if (base) {
           e.preventDefault();
           onDragOver();
         }
       }}
       onDrop={(e) => {
-        if (visual) {
+        if (base) {
           e.preventDefault();
           onDrop();
         }
       }}
     >
-      {visual && thumb && <img src={thumb} alt="" />}
+      {(base || overlay) && thumb && <img src={thumb} alt="" />}
       <span className="tl-clip-label">{label}</span>
-      {/* Stills/video trim at both edges; music only at the end (it stays anchored at t=0). */}
-      {visual && selected && (
+      {/* Stills/video trim at both edges; music/overlay only at the end (anchored at t=0). */}
+      {base && selected && (
         <span className="tl-trim tl-trim-start" onPointerDown={(e) => onTrimStart('start', e)} />
       )}
       {editable && selected && (

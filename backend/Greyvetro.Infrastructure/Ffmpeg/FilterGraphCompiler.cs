@@ -8,9 +8,12 @@ namespace Greyvetro.Infrastructure.Ffmpeg;
 /// I/O — assets are referenced by caller-resolved paths — so the fiddly filter-graph math is
 /// unit-testable without ffmpeg (see docs/timeline-editor-plan.md §6).
 ///
-/// Scope so far: one full-frame visual base layer assembled with <c>concat</c> (stills looped,
-/// real video trimmed) + one voiceover audio track. Overlay layers, transforms, and multi-audio
-/// come in later phases.
+/// A full-frame visual base layer (the lowest-zIndex photo/video track(s)) is assembled with
+/// <c>concat</c> (stills looped, real video trimmed), each clip optionally reframed
+/// (<see cref="Clip.Crop"/>) and rotated (<see cref="Clip.Rotation"/>). Higher-zIndex visual
+/// tracks composite as PiP/logo-style <c>overlay</c> layers (<see cref="Clip.Position"/>/<see
+/// cref="Clip.Scale"/>), under the caption alpha-PNG layer. Audio supports multi-track mixing
+/// (per-clip/-track volume, fades). Motion (Ken Burns) and transitions are still later phases.
 /// </summary>
 public class FilterGraphCompiler
 {
@@ -88,7 +91,9 @@ public class FilterGraphCompiler
             // Optional reframe: crop a normalized source region first (zoom/pan), then cover-fit.
             // Full-frame/absent crop emits nothing, so an un-transformed clip stays byte-identical.
             filters.Append($"[{i}:v]{CropPrefix(clip.Crop)}scale={w}:{h}:force_original_aspect_ratio=increase,")
-                .Append($"crop={w}:{h},setsar=1,fps={fps}")
+                .Append($"crop={w}:{h}")
+                .Append(RotateSuffix(clip.Rotation, w, h))
+                .Append($",setsar=1,fps={fps}")
                 .AppendLine($"[v{i}];");
         }
 
@@ -165,28 +170,76 @@ public class FilterGraphCompiler
             audioInputCount = audioParts.Count;
         }
 
-        // --- Captions (Phase 3: alpha-PNG overlay track) ---
-        // Each caption clip with a supplied transparent PNG becomes a top overlay on the base
-        // video, gated to its [startTime, startTime+duration] window. The PNGs are browser-rendered
-        // (brand font) and only composited here — the backend has no drawtext/freetype
-        // (docs/timeline-editor-plan.md §5). Caption inputs come after the audio inputs so the
-        // audio stream indices above are untouched; with none, the graph is the legacy one.
+        // --- Overlay visual layers (Phase 3c: 2nd+ visual track, z-index layering) ---
+        // Any photo/video track above the base zIndex composites as a PiP/logo-style overlay: each
+        // clip is scaled to its normalized Scale (source aspect kept via -2) and placed at its
+        // normalized Position, gated to its [startTime, startTime+duration] window — the same
+        // overlay/enable technique as captions, just underneath them. A still is fed as a single
+        // frame and held for its window by overlay's default eof_action=repeat (same trick captions
+        // already rely on); real video is input-seek trimmed like the base track. Inputs are
+        // appended right after the audio inputs (before captions — see the caption index below).
+        var overlayClips = visualTracks
+            .Where(t => t.ZIndex != baseZ)
+            .SelectMany(t => t.Clips.Select(c => (Clip: c, TrackZIndex: t.ZIndex)))
+            .Where(p => assetPaths.ContainsKey(p.Clip.SourceId))
+            .OrderBy(p => p.TrackZIndex)
+            .ThenBy(p => p.Clip.StartTime)
+            .Select(p => p.Clip)
+            .ToList();
+
         var videoMap = "[vout]";
-        if (captionPaths is { Count: > 0 })
+        if (overlayClips.Count > 0)
         {
-            var captionClips = timeline.Tracks
+            var overlayBase = visualClips.Count + audioInputCount;
+            var prev = "[vout]";
+            for (var j = 0; j < overlayClips.Count; j++)
+            {
+                var clip = overlayClips[j];
+                var idx = overlayBase + j;
+                var path = assetPaths[clip.SourceId];
+                if (TypeOf(clip.SourceId) == MediaType.Video)
+                    inputs.AddRange(["-ss", FfmpegProcess.Fmt(clip.InPoint), "-t", FfmpegProcess.Fmt(clip.Duration), "-i", path]);
+                else
+                    inputs.AddRange(["-i", path]);
+
+                var scale = clip.Scale is > 0 ? clip.Scale.Value : 0.3;
+                var targetW = (int)Math.Round(w * scale);
+                var x = (int)Math.Round((clip.Position?.X ?? 0) * w);
+                var y = (int)Math.Round((clip.Position?.Y ?? 0) * h);
+                var start = FfmpegProcess.Fmt(clip.StartTime);
+                var end = FfmpegProcess.Fmt(clip.StartTime + clip.Duration);
+                var outLabel = j == overlayClips.Count - 1 ? "[vov]" : $"[vv{j}]";
+
+                filters.Append($";[{idx}:v]{CropPrefix(clip.Crop)}scale={targetW}:-2,setsar=1[ovl{j}]")
+                    .Append($";{prev}[ovl{j}]overlay={x}:{y}:enable='between(t,{start},{end})'{outLabel}");
+                prev = outLabel;
+            }
+            videoMap = "[vov]";
+        }
+
+        // --- Captions (Phase 3a: alpha-PNG overlay track) ---
+        // Each caption clip with a supplied transparent PNG becomes a top overlay, gated to its
+        // [startTime, startTime+duration] window. The PNGs are browser-rendered (brand font) and
+        // only composited here — the backend has no drawtext/freetype (docs/timeline-editor-plan.md
+        // §5). Caption inputs come after audio AND the overlay-visual inputs above (so those stream
+        // indices stay valid); with none, the graph maps straight through (legacy path, or the
+        // overlay-visual output).
+        var captionClips = captionPaths is { Count: > 0 }
+            ? timeline.Tracks
                 .Where(t => t.Type == TrackType.Caption)
                 .SelectMany(t => t.Clips)
                 .Where(c => captionPaths.ContainsKey(c.Id))
                 .OrderBy(c => c.StartTime)
-                .ToList();
-
-            var prev = "[vout]";
+                .ToList()
+            : [];
+        if (captionClips.Count > 0)
+        {
+            var prev = videoMap;
             for (var j = 0; j < captionClips.Count; j++)
             {
                 var clip = captionClips[j];
-                var idx = visualClips.Count + audioInputCount + j;
-                inputs.AddRange(["-i", captionPaths[clip.Id]]);
+                var idx = visualClips.Count + audioInputCount + overlayClips.Count + j;
+                inputs.AddRange(["-i", captionPaths![clip.Id]]);
 
                 var start = FfmpegProcess.Fmt(clip.StartTime);
                 var end = FfmpegProcess.Fmt(clip.StartTime + clip.Duration);
@@ -195,8 +248,7 @@ public class FilterGraphCompiler
                 prev = outLabel;
             }
 
-            if (captionClips.Count > 0)
-                videoMap = "[vcap]";
+            videoMap = "[vcap]";
         }
 
         var output = new List<string>
@@ -230,5 +282,24 @@ public class FilterGraphCompiler
             return string.Empty;
         return $"crop=iw*{FfmpegProcess.Fmt(crop.Width)}:ih*{FfmpegProcess.Fmt(crop.Height)}:" +
                $"iw*{FfmpegProcess.Fmt(crop.X)}:ih*{FfmpegProcess.Fmt(crop.Y)},";
+    }
+
+    /// <summary>
+    /// A <c>scale,rotate</c> suffix that tilts an already-cover-fit WxH frame by <paramref
+    /// name="rotationDegrees"/>, or empty when rotation is absent/zero (keeps the un-rotated graph
+    /// byte-identical). The frame is pre-scaled by the smallest uniform factor that keeps the
+    /// rotated rectangle fully covering the WxH canvas, so no black corners appear after ffmpeg
+    /// crops back down to WxH (<c>rotate</c>'s <c>ow</c>/<c>oh</c>).
+    /// </summary>
+    private static string RotateSuffix(double? rotationDegrees, int w, int h)
+    {
+        if (rotationDegrees is null or 0)
+            return string.Empty;
+
+        var rad = Math.Abs(rotationDegrees.Value) * Math.PI / 180;
+        var k = Math.Cos(rad) + (double)h / w * Math.Sin(rad);
+        var zw = (int)Math.Ceiling(w * k);
+        var zh = (int)Math.Ceiling(h * k);
+        return $",scale={zw}:{zh},rotate={FfmpegProcess.Fmt(rotationDegrees.Value)}*PI/180:ow={w}:oh={h}:c=black";
     }
 }

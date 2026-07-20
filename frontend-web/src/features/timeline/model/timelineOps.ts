@@ -6,6 +6,21 @@ export const MIN_CLIP = 0.3;
 
 const isVisual = (t: Track) => t.type === 'photo' || t.type === 'video';
 
+/**
+ * The zIndex of the base (lowest) visual layer — the contiguous `concat` track. Higher-zIndex
+ * photo/video tracks are overlay (PiP/logo) layers (Phase 3c), which float freely and never
+ * participate in reanchor/reorder/split. Falls back to 0 for a timeline with no visual tracks yet.
+ */
+function baseVisualZIndex(timeline: Timeline): number {
+  const zs = timeline.tracks.filter(isVisual).map((t) => t.zIndex);
+  return zs.length ? Math.min(...zs) : 0;
+}
+
+/** True for a photo/video track that's part of the base concat, as opposed to an overlay layer. */
+function isBaseVisual(timeline: Timeline, track: Track): boolean {
+  return isVisual(track) && track.zIndex === baseVisualZIndex(timeline);
+}
+
 /** The track that owns a clip, or null. */
 function trackOf(timeline: Timeline, clipId: string): Track | null {
   return timeline.tracks.find((t) => t.clips.some((c) => c.id === clipId)) ?? null;
@@ -15,9 +30,11 @@ function trackOf(timeline: Timeline, clipId: string): Track | null {
  * Re-lay the timeline into a well-formed, contiguous document after a structural edit. The base
  * visual track is a `concat`, so clips play back-to-back: photo clips are anchored from 0 in
  * array order, then video clips continue the cursor. The (display-only) caption lane is rebuilt
- * to mirror the photo clips (text carried over by source id). Audio is left untouched. Pure.
+ * to mirror the photo clips (text carried over by source id). Audio and overlay (PiP/logo) tracks
+ * are left untouched — they float freely, not part of the concat. Pure.
  */
 function reanchor(timeline: Timeline): Timeline {
+  const baseZ = baseVisualZIndex(timeline);
   let cursor = 0;
   const anchor = (clips: readonly Clip[]): Clip[] =>
     clips.map((c) => {
@@ -26,8 +43,8 @@ function reanchor(timeline: Timeline): Timeline {
       return clip;
     });
 
-  const photoTrack = timeline.tracks.find((t) => t.type === 'photo');
-  const videoTrack = timeline.tracks.find((t) => t.type === 'video');
+  const photoTrack = timeline.tracks.find((t) => t.type === 'photo' && t.zIndex === baseZ);
+  const videoTrack = timeline.tracks.find((t) => t.type === 'video' && t.zIndex === baseZ);
   const photoClips = photoTrack ? anchor(photoTrack.clips) : [];
   const videoClips = videoTrack ? anchor(videoTrack.clips) : [];
 
@@ -45,8 +62,8 @@ function reanchor(timeline: Timeline): Timeline {
   }));
 
   const tracks = timeline.tracks.map((t) => {
-    if (t.type === 'photo') return { ...t, clips: photoClips };
-    if (t.type === 'video') return { ...t, clips: videoClips };
+    if (photoTrack && t.id === photoTrack.id) return { ...t, clips: photoClips };
+    if (videoTrack && t.id === videoTrack.id) return { ...t, clips: videoClips };
     if (t.type === 'caption') return { ...t, clips: captionClips };
     return t;
   });
@@ -60,7 +77,8 @@ function reanchor(timeline: Timeline): Timeline {
 export function moveClip(timeline: Timeline, clipId: string, targetClipId: string): Timeline {
   if (clipId === targetClipId) return timeline;
   const track = trackOf(timeline, clipId);
-  if (!track || !isVisual(track) || !track.clips.some((c) => c.id === targetClipId)) return timeline;
+  if (!track || !isBaseVisual(timeline, track) || !track.clips.some((c) => c.id === targetClipId))
+    return timeline;
 
   const clips = [...track.clips];
   const [moved] = clips.splice(
@@ -109,7 +127,7 @@ export function trimClip(
  */
 export function splitClip(timeline: Timeline, clipId: string, localOffset: number): Timeline {
   const track = trackOf(timeline, clipId);
-  if (!track || !isVisual(track)) return timeline;
+  if (!track || !isBaseVisual(timeline, track)) return timeline;
   const idx = track.clips.findIndex((c) => c.id === clipId);
   const clip = track.clips[idx];
   if (localOffset <= MIN_CLIP || localOffset >= clip.duration - MIN_CLIP) return timeline;
@@ -141,10 +159,10 @@ export function splitClip(timeline: Timeline, clipId: string, localOffset: numbe
  * requires at least one). Re-anchors. Pure. */
 export function deleteClip(timeline: Timeline, clipId: string): Timeline {
   const track = trackOf(timeline, clipId);
-  if (!track || !isVisual(track)) return timeline;
+  if (!track || !isBaseVisual(timeline, track)) return timeline;
   const clips = track.clips.filter((c) => c.id !== clipId);
   const remainingVisual = timeline.tracks
-    .filter(isVisual)
+    .filter((t) => isBaseVisual(timeline, t))
     .reduce((n, t) => n + (t.id === track.id ? clips.length : t.clips.length), 0);
   if (remainingVisual === 0) return timeline;
   return reanchor(withTrackClips(timeline, track.id, clips));
@@ -264,6 +282,76 @@ export function setCrop(timeline: Timeline, clipId: string, crop: Crop | null): 
   );
 }
 
+/** Widest tilt the reframe control allows, in either direction (degrees). */
+export const MAX_ROTATION = 45;
+
+/** Set (or clear, with null) a base-track clip's tilt in degrees. Overlay-track clips don't
+ * rotate in v1 (they're already free-positioned; the compiler ignores Rotation on them). Pure. */
+export function setRotation(timeline: Timeline, clipId: string, rotation: number | null): Timeline {
+  const track = trackOf(timeline, clipId);
+  if (!track || !isBaseVisual(timeline, track)) return timeline;
+  return withTrackClips(
+    timeline,
+    track.id,
+    track.clips.map((c) =>
+      c.id === clipId ? { ...c, rotation: rotation && Math.abs(rotation) > 0.01 ? rotation : undefined } : c,
+    ),
+  );
+}
+
+/** True for a photo/video track that's an overlay (PiP/logo) layer, not the base concat. */
+export function isOverlayTrack(timeline: Timeline, trackId: string): boolean {
+  const track = timeline.tracks.find((t) => t.id === trackId);
+  return !!track && isVisual(track) && !isBaseVisual(timeline, track);
+}
+
+/** Default placement/size for a freshly added overlay (top-right-ish PiP, 30% of the frame width). */
+const DEFAULT_OVERLAY_POSITION = { x: 0.62, y: 0.04 };
+const DEFAULT_OVERLAY_SCALE = 0.3;
+
+/**
+ * Add an image overlay (logo/PiP) as its own visual track above the base, one clip spanning the
+ * current timeline length by default (a persistent watermark; trim its end to shorten). The asset
+ * is registered so the backend compiler composites it with `overlay`. Pure.
+ */
+export function addOverlayImage(timeline: Timeline, assetId: string): Timeline {
+  const span = Math.max(timelineDuration(timeline), MIN_CLIP);
+  const clip: Clip = {
+    id: `overlay-${assetId}`,
+    sourceId: assetId,
+    startTime: 0,
+    duration: span,
+    inPoint: 0,
+    outPoint: span,
+    position: DEFAULT_OVERLAY_POSITION,
+    scale: DEFAULT_OVERLAY_SCALE,
+  };
+  const maxZ = timeline.tracks.filter(isVisual).reduce((m, t) => Math.max(m, t.zIndex), 0);
+  const track: Track = { id: `overlay-${assetId}`, type: 'photo', zIndex: maxZ + 1, clips: [clip] };
+  const asset: MediaAsset = { id: assetId, type: 'image' };
+  return { ...timeline, tracks: [...timeline.tracks, track], assets: [...timeline.assets, asset] };
+}
+
+/** Set an overlay clip's position (normalized 0–1 top-left) and/or scale (0–1 of output width).
+ * Unspecified fields are left as they were. Pure. */
+export function setOverlayTransform(
+  timeline: Timeline,
+  clipId: string,
+  patch: { position?: { x: number; y: number }; scale?: number },
+): Timeline {
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((t) => ({
+      ...t,
+      clips: t.clips.map((c) =>
+        c.id === clipId
+          ? { ...c, position: patch.position ?? c.position, scale: patch.scale ?? c.scale }
+          : c,
+      ),
+    })),
+  };
+}
+
 function withTrackClips(timeline: Timeline, trackId: string, clips: Clip[]): Timeline {
   return { ...timeline, tracks: timeline.tracks.map((t) => (t.id === trackId ? { ...t, clips } : t)) };
 }
@@ -272,11 +360,13 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi);
 }
 
-/** Latest end across the visual (photo/video) tracks — where the next clip appends. */
+/** Latest end across the BASE visual (photo/video) tracks — where the next clip appends. Overlay
+ * (PiP/logo) layers are excluded — they float independently of the base concat's length. */
 export function visualEnd(timeline: Timeline): number {
+  const baseZ = baseVisualZIndex(timeline);
   let end = 0;
   for (const track of timeline.tracks) {
-    if (track.type !== 'photo' && track.type !== 'video') continue;
+    if (!isVisual(track) || track.zIndex !== baseZ) continue;
     for (const clip of track.clips) end = Math.max(end, clip.startTime + clip.duration);
   }
   return end;
@@ -317,11 +407,12 @@ export function appendVideoClip(
 }
 
 /**
- * Re-attach user-added media (video clips + music tracks) from a previously saved timeline onto a
- * freshly seeded one (the photo/audio-voiceover/caption tracks are re-derived from the current
- * storyboard each re-sync). Video clips are re-anchored sequentially after the new visual end so
- * storyboard edits stay reflected; music tracks (any audio track that isn't the seeded voiceover)
- * carry over as-is. Pure.
+ * Re-attach user-added media (video clips + music tracks + overlay/PiP tracks) from a previously
+ * saved timeline onto a freshly seeded one (the photo/audio-voiceover/caption tracks are
+ * re-derived from the current storyboard each re-sync). Video clips are re-anchored sequentially
+ * after the new visual end so storyboard edits stay reflected; music tracks (any audio track that
+ * isn't the seeded voiceover) and overlay tracks (any visual track above the saved timeline's base
+ * zIndex) carry over as-is. Pure.
  */
 export function mergeAddedMedia(base: Timeline, saved: Timeline | null): Timeline {
   if (!saved) return base;
@@ -353,6 +444,17 @@ export function mergeAddedMedia(base: Timeline, saved: Timeline | null): Timelin
     result = {
       ...result,
       tracks: [...result.tracks, ...musicTracks],
+      assets: [...result.assets, ...saved.assets.filter((a) => ids.has(a.id))],
+    };
+  }
+
+  const savedBaseZ = baseVisualZIndex(saved);
+  const overlayTracks = saved.tracks.filter((t) => isVisual(t) && t.zIndex !== savedBaseZ);
+  if (overlayTracks.length > 0) {
+    const ids = new Set(overlayTracks.flatMap((t) => t.clips.map((c) => c.sourceId)));
+    result = {
+      ...result,
+      tracks: [...result.tracks, ...overlayTracks],
       assets: [...result.assets, ...saved.assets.filter((a) => ids.has(a.id))],
     };
   }

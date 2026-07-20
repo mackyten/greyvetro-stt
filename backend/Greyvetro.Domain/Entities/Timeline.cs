@@ -82,6 +82,25 @@ public record Clip
     /// </summary>
     public CropRect? Crop { get; init; }
 
+    /// <summary>
+    /// Optional tilt in degrees for a base-track (full-frame) clip, applied after the cover-fit.
+    /// The compiler auto-zooms just enough to keep the rotated frame gap-free (no black corners).
+    /// Null/0 = no rotation (byte-identical to an un-rotated clip).
+    /// </summary>
+    public double? Rotation { get; init; }
+
+    /// <summary>
+    /// Placement for an overlay-layer clip (a visual clip on a non-base, higher-<see cref="Track.ZIndex"/>
+    /// track) — normalized 0–1 top-left in output space. Ignored for base-track clips.
+    /// </summary>
+    public NormalizedPoint? Position { get; init; }
+
+    /// <summary>
+    /// Size of an overlay-layer clip as a fraction (0–1) of the output width; height follows the
+    /// source's aspect ratio. Ignored for base-track clips. Null defaults to a modest PiP size.
+    /// </summary>
+    public double? Scale { get; init; }
+
     // --- Audio ---
 
     /// <summary>0–1 gain for an individual audio clip (null = unity).</summary>
@@ -103,6 +122,13 @@ public record CropRect
     public double Y { get; init; }
     public double Width { get; init; } = 1;
     public double Height { get; init; } = 1;
+}
+
+/// <summary>A normalized (0–1) point in output space, e.g. an overlay clip's top-left placement.</summary>
+public record NormalizedPoint
+{
+    public double X { get; init; }
+    public double Y { get; init; }
 }
 
 public enum MediaType
