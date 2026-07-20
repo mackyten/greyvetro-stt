@@ -12,6 +12,7 @@ import type { Timeline } from './model/types';
 import { getAsset, saveAsset } from './timelineAssetRepo';
 import { getTimeline, saveTimeline } from './timelineRepo';
 import { TimelineEditor } from './TimelineEditor';
+import { useTimelineHistory } from './useTimelineHistory';
 
 /**
  * Timeline editor (Greyvetro Studio Phase 5, Phase 2) — interactive multi-track editing. Seeds a
@@ -27,7 +28,7 @@ export function TimelineScreen() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [clips, setClips] = useState<GalleryItem[]>([]);
   const [scenes, setScenes] = useState<StoredScene[] | null>(null);
-  const [timeline, setTimeline] = useState<Timeline | null>(null);
+  const { timeline, load: loadTimeline, set: setTimeline, undo, redo, canUndo, canRedo } = useTimelineHistory();
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -48,14 +49,14 @@ export function TimelineScreen() {
   useEffect(() => {
     if (!projectId) {
       setScenes(null);
-      setTimeline(null);
+      loadTimeline(null);
       return;
     }
     let cancelled = false;
     let urls: string[] = [];
     let audioObjUrl: string | null = null;
     setScenes(null);
-    setTimeline(null);
+    loadTimeline(null);
     setAudioUrl(null);
     audioRef.current = null;
 
@@ -115,7 +116,7 @@ export function TimelineScreen() {
       setImageUrls(map);
       setAudioUrl(audioObjUrl);
       setScenes(list);
-      setTimeline(tl);
+      loadTimeline(tl);
     })();
 
     return () => {
@@ -125,7 +126,7 @@ export function TimelineScreen() {
       setImageUrls({});
       setAudioUrl(null);
     };
-  }, [projectId]);
+  }, [projectId, loadTimeline]);
 
   const project = projects.find((p) => p.id === projectId) ?? null;
   const voiceClip = scenes?.length ? clips.find((c) => c.id === scenes[0].clipId) ?? null : null;
@@ -331,6 +332,10 @@ export function TimelineScreen() {
             imageUrls={imageUrls}
             audioUrl={audioUrl}
             onChange={commit}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
           />
         </>
       ) : (

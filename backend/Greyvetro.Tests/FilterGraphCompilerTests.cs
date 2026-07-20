@@ -850,4 +850,192 @@ public class FilterGraphCompilerTests
         Assert.DoesNotContain("zoompan", Norm(plan.FilterComplex));
         Assert.Contains("-ss", plan.InputArgs);
     }
+
+    // --- Transitions (Phase 6) ---
+
+    [Fact]
+    public void Compile_TwoClipsWithDissolveTransition_EmitsXfadeWithComputedOffset()
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0, Duration = 3.0 },
+                        new Clip
+                        {
+                            Id = "c1", SourceId = "img-1", StartTime = 2.0, Duration = 4.0,
+                            TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 1.0 },
+                        },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "voice", Duration = 6.0 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg", ["img-1"] = "/tmp/b.jpg", ["voice"] = "/tmp/voice.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        const string expected =
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0];\n" +
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1];\n" +
+            "[v0][v1]xfade=transition=fade:duration=1:offset=2[vout]";
+        Assert.Equal(expected, Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_MixedCutAndTransitionClips_GroupsIntoSegmentsThenXfades()
+    {
+        // c0-c1 is a plain cut... no wait: c1 carries the transition (into c1, from c0); c1-c2 is a
+        // plain cut. So c1/c2 group into one concat'd segment, which then xfades with c0.
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0, Duration = 2.0 },
+                        new Clip
+                        {
+                            Id = "c1", SourceId = "img-1", StartTime = 1.5, Duration = 2.0,
+                            TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 0.5 },
+                        },
+                        new Clip { Id = "c2", SourceId = "img-2", StartTime = 3.5, Duration = 3.0 },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "voice", Duration = 6.5 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg", ["img-1"] = "/tmp/b.jpg", ["img-2"] = "/tmp/c.jpg", ["voice"] = "/tmp/voice.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        const string expected =
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0];\n" +
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1];\n" +
+            "[2:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v2];\n" +
+            "[v1][v2]concat=n=2:v=1:a=0[seg1];" +
+            "[v0][seg1]xfade=transition=fade:duration=0.5:offset=1.5[vout]";
+        Assert.Equal(expected, Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_FadeToBlackTransition_UsesFadeblackXfadeType()
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0, Duration = 3.0 },
+                        new Clip
+                        {
+                            Id = "c1", SourceId = "img-1", StartTime = 2.2, Duration = 3.0,
+                            TransitionIn = new Transition { Style = TransitionStyle.FadeToBlack, Duration = 0.8 },
+                        },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "voice", Duration = 5.2 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg", ["img-1"] = "/tmp/b.jpg", ["voice"] = "/tmp/voice.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains("xfade=transition=fadeblack:duration=0.8:offset=2.2", Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_TransitionLongerThanEitherClip_IsClampedTo90PercentOfShorterClip()
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0, Duration = 1.0 },
+                        new Clip
+                        {
+                            Id = "c1", SourceId = "img-1", StartTime = 0.1, Duration = 1.0,
+                            TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 10 },
+                        },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "voice", Duration = 1.1 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg", ["img-1"] = "/tmp/b.jpg", ["voice"] = "/tmp/voice.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Clamped to 90% of the shorter (1.0s) adjacent clip, not the requested 10s.
+        Assert.Contains("xfade=transition=fade:duration=0.9:offset=0.1", Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_TransitionTooShortAfterClamping_IsDropped_FallsBackToPlainConcat()
+    {
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0, Duration = 0.05 },
+                        new Clip
+                        {
+                            Id = "c1", SourceId = "img-1", StartTime = 0.05, Duration = 0.05,
+                            TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 0.05 },
+                        },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "voice", Duration = 0.1 }] },
+            ],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg", ["img-1"] = "/tmp/b.jpg", ["voice"] = "/tmp/voice.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // 90% of the shorter (0.05s) clip is 0.045s — below MinTransitionDuration, so it's dropped.
+        Assert.DoesNotContain("xfade", Norm(plan.FilterComplex));
+        Assert.Contains("concat=n=2:v=1:a=0[vout]", Norm(plan.FilterComplex));
+    }
 }

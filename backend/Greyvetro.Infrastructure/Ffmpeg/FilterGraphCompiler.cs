@@ -8,12 +8,14 @@ namespace Greyvetro.Infrastructure.Ffmpeg;
 /// I/O — assets are referenced by caller-resolved paths — so the fiddly filter-graph math is
 /// unit-testable without ffmpeg (see docs/timeline-editor-plan.md §6).
 ///
-/// A full-frame visual base layer (the lowest-zIndex photo/video track(s)) is assembled with
-/// <c>concat</c> (stills looped, real video trimmed), each clip optionally reframed
-/// (<see cref="Clip.Crop"/>) and rotated (<see cref="Clip.Rotation"/>). Higher-zIndex visual
-/// tracks composite as PiP/logo-style <c>overlay</c> layers (<see cref="Clip.Position"/>/<see
-/// cref="Clip.Scale"/>), under the caption alpha-PNG layer. Audio supports multi-track mixing
-/// (per-clip/-track volume, fades). Motion (Ken Burns) and transitions are still later phases.
+/// A full-frame visual base layer (the lowest-zIndex photo/video track(s)) is assembled from
+/// cut-joined segments (each a <c>concat</c>, stills looped, real video trimmed) folded pairwise with
+/// <c>xfade</c> wherever a clip carries a <see cref="Clip.TransitionIn"/> — with none anywhere this
+/// reduces to a single plain <c>concat</c>, byte-identical to the pre-transitions graph. Each clip is
+/// optionally reframed (<see cref="Clip.Crop"/>), rotated (<see cref="Clip.Rotation"/>), or animated
+/// (<see cref="Clip.Motion"/>, Ken Burns via <c>zoompan</c>). Higher-zIndex visual tracks composite as
+/// PiP/logo-style <c>overlay</c> layers (<see cref="Clip.Position"/>/<see cref="Clip.Scale"/>), under
+/// the caption alpha-PNG layer. Audio supports multi-track mixing (per-clip/-track volume, fades).
 /// </summary>
 public class FilterGraphCompiler
 {
@@ -103,8 +105,7 @@ public class FilterGraphCompiler
             filters.Append($"[{i}:v]{chain}").AppendLine($"[v{i}];");
         }
 
-        filters.Append(string.Concat(Enumerable.Range(0, visualClips.Count).Select(i => $"[v{i}]")))
-            .Append($"concat=n={visualClips.Count}:v=1:a=0[vout]");
+        AppendBaseTrackAssembly(filters, visualClips);
 
         // --- Audio ---
         // Every unmuted audio clip with a supplied source becomes an input (input-seek trimmed),
@@ -271,6 +272,97 @@ public class FilterGraphCompiler
             FilterComplex = filters.ToString(),
             OutputArgs = output,
         };
+    }
+
+    /// <summary>Shortest transition ffmpeg is asked to render; anything clamped below this is dropped.</summary>
+    private const double MinTransitionDuration = 0.1;
+
+    /// <summary>
+    /// A transition's duration clamped against both adjacent clips' own length (a crossfade can't
+    /// outlast either shot it's between), leaving a small margin so at least a sliver of each clip
+    /// plays on its own. Returns null when absent, non-positive, or too short after clamping — the
+    /// server never trusts the client's duration outright.
+    /// </summary>
+    private static Transition? ValidTransition(Transition? transition, double prevDuration, double duration)
+    {
+        if (transition is null || transition.Duration <= 0) return null;
+        var cap = Math.Min(prevDuration, duration) * 0.9;
+        var clamped = Math.Min(transition.Duration, cap);
+        return clamped < MinTransitionDuration ? null : transition with { Duration = clamped };
+    }
+
+    /// <summary>
+    /// Assembles the base visual track's <c>[v{i}]</c> streams into <c>[vout]</c>. Clips joined by a
+    /// plain cut are grouped into a segment and <c>concat</c>'d (the original, cheap path — with no
+    /// transitions anywhere this reduces to exactly the pre-Phase-6 single concat, byte-identical: the
+    /// regression gate this method must never break). A clip with a valid <see
+    /// cref="Clip.TransitionIn"/> starts a new segment instead; segments are then folded pairwise with
+    /// ffmpeg <c>xfade</c>, each one overlapping the running combined stream by the transition's
+    /// duration. <c>offset</c> is expressed against the *combined* left stream's own running duration
+    /// (not the original per-clip timestamps) — the standard formula for chaining multiple xfades.
+    /// </summary>
+    private static void AppendBaseTrackAssembly(StringBuilder filters, IReadOnlyList<Clip> visualClips)
+    {
+        var segments = new List<(int Start, int Count, double Duration)>();
+        var transitionsBetween = new List<Transition>();
+        var segStart = 0;
+        var segDuration = 0.0;
+        for (var i = 0; i < visualClips.Count; i++)
+        {
+            if (i > 0)
+            {
+                var transition = ValidTransition(visualClips[i].TransitionIn, visualClips[i - 1].Duration, visualClips[i].Duration);
+                if (transition is not null)
+                {
+                    segments.Add((segStart, i - segStart, segDuration));
+                    transitionsBetween.Add(transition);
+                    segStart = i;
+                    segDuration = 0;
+                }
+            }
+            segDuration += visualClips[i].Duration;
+        }
+        segments.Add((segStart, visualClips.Count - segStart, segDuration));
+
+        var isFirstStatement = true;
+        void AppendStatement(string stmt)
+        {
+            if (!isFirstStatement) filters.Append(';');
+            filters.Append(stmt);
+            isFirstStatement = false;
+        }
+
+        string SegmentLabel(int segIdx)
+        {
+            var (start, count, _) = segments[segIdx];
+            if (count == 1) return $"v{start}";
+            var label = $"seg{segIdx}";
+            AppendStatement(string.Concat(Enumerable.Range(start, count).Select(i => $"[v{i}]")) +
+                $"concat=n={count}:v=1:a=0[{label}]");
+            return label;
+        }
+
+        if (segments.Count == 1)
+        {
+            AppendStatement(string.Concat(Enumerable.Range(0, visualClips.Count).Select(i => $"[v{i}]")) +
+                $"concat=n={visualClips.Count}:v=1:a=0[vout]");
+            return;
+        }
+
+        var prevLabel = SegmentLabel(0);
+        var cumulative = segments[0].Duration;
+        for (var s = 1; s < segments.Count; s++)
+        {
+            var nextLabel = SegmentLabel(s);
+            var transition = transitionsBetween[s - 1];
+            var xfadeType = transition.Style == TransitionStyle.FadeToBlack ? "fadeblack" : "fade";
+            var offset = Math.Max(0, cumulative - transition.Duration);
+            var outLabel = s == segments.Count - 1 ? "vout" : $"xf{s}";
+            AppendStatement($"[{prevLabel}][{nextLabel}]xfade=transition={xfadeType}:" +
+                $"duration={FfmpegProcess.Fmt(transition.Duration)}:offset={FfmpegProcess.Fmt(offset)}[{outLabel}]");
+            cumulative = cumulative + segments[s].Duration - transition.Duration;
+            prevLabel = outLabel;
+        }
     }
 
     /// <summary>Clip gain × track gain, or null when neither is set (unity — no filter emitted).</summary>

@@ -1,5 +1,14 @@
 import { VOICEOVER_ASSET_ID } from './seed';
-import { timelineDuration, type Clip, type KenBurns, type MediaAsset, type Timeline, type Track } from './types';
+import {
+  timelineDuration,
+  type Clip,
+  type KenBurns,
+  type MediaAsset,
+  type Timeline,
+  type Track,
+  type TransitionIn,
+  type TransitionStyle,
+} from './types';
 
 /** Smallest clip length the editor allows (seconds) — keeps trims/splits well-formed. */
 export const MIN_CLIP = 0.3;
@@ -26,27 +35,65 @@ function trackOf(timeline: Timeline, clipId: string): Track | null {
   return timeline.tracks.find((t) => t.clips.some((c) => c.id === clipId)) ?? null;
 }
 
+/** Shortest transition the compiler will render; anything clamped below this is dropped. Mirrors
+ * the backend's `MinTransitionDuration` (FilterGraphCompiler.cs) exactly. */
+export const MIN_TRANSITION = 0.1;
+
+/**
+ * A transition's duration clamped against both adjacent clips' own length — a crossfade can't
+ * outlast either shot it's between, and this is the exact formula the backend compiler uses
+ * (`ValidTransition`), so the editor's re-anchored timeline always matches what actually renders.
+ */
+function clampTransitionDuration(requested: number, prevDuration: number, duration: number): number {
+  return Math.min(requested, Math.min(prevDuration, duration) * 0.9);
+}
+
+/** The overlap (seconds) a clip's transitionIn actually contributes once clamped, or 0 if absent/
+ * too short to survive clamping (matches the backend's drop-if-too-short behavior). */
+function transitionOverlap(t: TransitionIn | undefined, prevDuration: number, duration: number): number {
+  if (!t || t.duration <= 0) return 0;
+  const clamped = clampTransitionDuration(t.duration, prevDuration, duration);
+  return clamped < MIN_TRANSITION ? 0 : clamped;
+}
+
+/** All base-visual (photo/video) clips across tracks, in play order — mirrors the backend
+ * compiler's `visualClips` (docs/timeline-editor-plan.md §6). */
+function baseVisualClipsOrdered(timeline: Timeline): Clip[] {
+  const baseZ = baseVisualZIndex(timeline);
+  return timeline.tracks
+    .filter((t) => isVisual(t) && t.zIndex === baseZ)
+    .flatMap((t) => t.clips)
+    .sort((a, b) => a.startTime - b.startTime);
+}
+
 /**
  * Re-lay the timeline into a well-formed, contiguous document after a structural edit. The base
- * visual track is a `concat`, so clips play back-to-back: photo clips are anchored from 0 in
- * array order, then video clips continue the cursor. The (display-only) caption lane is rebuilt
- * to mirror the photo clips (text carried over by source id). Audio and overlay (PiP/logo) tracks
- * are left untouched — they float freely, not part of the concat. Pure.
+ * visual track is a `concat` (or, where a clip carries a `transitionIn`, an `xfade` overlap): photo
+ * clips are anchored from 0 in array order, then video clips continue the cursor, each clip's start
+ * pulled back by its (clamped) transition overlap with the one before it — see
+ * {@link clampTransitionDuration}, which mirrors the backend compiler exactly so the editor's
+ * timeline always reflects what will actually render. The (display-only) caption lane is rebuilt to
+ * mirror the photo clips (text carried over by source id). Audio and overlay (PiP/logo) tracks are
+ * left untouched — they float freely, not part of the concat. Pure.
  */
 function reanchor(timeline: Timeline): Timeline {
   const baseZ = baseVisualZIndex(timeline);
-  let cursor = 0;
-  const anchor = (clips: readonly Clip[]): Clip[] =>
-    clips.map((c) => {
+
+  const anchorVisual = (clips: readonly Clip[]): Clip[] => {
+    let cursor = 0;
+    return clips.map((c, i) => {
+      if (i > 0) cursor -= transitionOverlap(c.transitionIn, clips[i - 1].duration, c.duration);
       const clip = { ...c, startTime: cursor };
       cursor += c.duration;
       return clip;
     });
+  };
 
   const photoTrack = timeline.tracks.find((t) => t.type === 'photo' && t.zIndex === baseZ);
   const videoTrack = timeline.tracks.find((t) => t.type === 'video' && t.zIndex === baseZ);
-  const photoClips = photoTrack ? anchor(photoTrack.clips) : [];
-  const videoClips = videoTrack ? anchor(videoTrack.clips) : [];
+  const combined = anchorVisual([...(photoTrack?.clips ?? []), ...(videoTrack?.clips ?? [])]);
+  const photoClips = photoTrack ? combined.slice(0, photoTrack.clips.length) : [];
+  const videoClips = videoTrack ? combined.slice(photoTrack?.clips.length ?? 0) : [];
 
   const textBySource = new Map<string, string>();
   for (const c of timeline.tracks.find((t) => t.type === 'caption')?.clips ?? [])
@@ -148,6 +195,9 @@ export function splitClip(timeline: Timeline, clipId: string, localOffset: numbe
     duration: clip.duration - localOffset,
     inPoint: isVideo ? cut : 0,
     outPoint: isVideo ? clip.outPoint : clip.duration - localOffset,
+    // The second half's predecessor is now the first half (a plain cut) — a transition into the
+    // original clip belongs on the first half only, not duplicated onto the new interior boundary.
+    transitionIn: undefined,
   };
 
   const clips = [...track.clips];
@@ -317,6 +367,44 @@ export function setMotion(
     timeline,
     track.id,
     track.clips.map((c) => (c.id === clipId ? { ...c, motion: motion ?? undefined } : c)),
+  );
+}
+
+/** The largest transition duration (seconds) the boundary before `clipId` can support, or 0 if
+ * there's no predecessor (first base-track clip) or the clip isn't on the base track. */
+export function maxTransitionDuration(timeline: Timeline, clipId: string): number {
+  const ordered = baseVisualClipsOrdered(timeline);
+  const idx = ordered.findIndex((c) => c.id === clipId);
+  if (idx <= 0) return 0;
+  return Math.min(ordered[idx - 1].duration, ordered[idx].duration) * 0.9;
+}
+
+/** Set (or clear, with null) a base-track clip's crossfade from the clip immediately before it.
+ * Ignored on the first base-track clip (nothing to fade from). Clamped against both adjacent
+ * clips' own duration — see {@link clampTransitionDuration} — so a request too small to survive
+ * clamping is dropped, same as the backend compiler would drop it. Re-anchors. Pure. */
+export function setClipTransition(
+  timeline: Timeline,
+  clipId: string,
+  transition: { style: TransitionStyle; duration: number } | null,
+): Timeline {
+  const ordered = baseVisualClipsOrdered(timeline);
+  const idx = ordered.findIndex((c) => c.id === clipId);
+  if (idx <= 0) return timeline;
+  const track = trackOf(timeline, clipId);
+  if (!track) return timeline;
+
+  let next: TransitionIn | undefined;
+  if (transition) {
+    const clamped = clampTransitionDuration(transition.duration, ordered[idx - 1].duration, ordered[idx].duration);
+    next = clamped >= MIN_TRANSITION ? { style: transition.style, duration: clamped } : undefined;
+  }
+  return reanchor(
+    withTrackClips(
+      timeline,
+      track.id,
+      track.clips.map((c) => (c.id === clipId ? { ...c, transitionIn: next } : c)),
+    ),
   );
 }
 

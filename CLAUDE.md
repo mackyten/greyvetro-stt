@@ -342,8 +342,32 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        scrubbing shows the animation. Verified: backend 31/31 (5 new tests),
        `tsc -b && vite build` + lint clean, and a real `/render` POST — a
        4s/120-frame clip visibly zoomed + panned between first and last frame.
-     - Remaining after Phase 5: Phase 6 (transitions `xfade`/`acrossfade`,
-       timeline snapping/zoom, undo/redo history stack).
+     - ✅ **TL Phase 6 — Transitions + polish** (shipped 2026-07-20): video
+       crossfades (`Clip.TransitionIn`, dissolve/fade-to-black, ffmpeg `xfade`
+       — cut-joined clips group into segments folded pairwise, so zero
+       transitions stays byte-identical to the pre-Phase-6 graph; duration
+       clamped to 90% of the shorter adjacent clip both client- and
+       server-side, since the overlap shrinks the base track's effective
+       length and the editor's re-anchored timeline must match what renders).
+       Web: a ⤭ badge on each inter-clip boundary opens a style+duration
+       inspector; clip bars visually overlap once a transition is set (no
+       extra rendering — `left`/`width` are still plain percentages). Timeline
+       **zoom** (pixels-per-second, 20–400, with Fit) replaced the old
+       percentage-of-container layout, ruler+lanes scrolling independently of
+       a pinned label column; trims **snap** to nearby clip edges/the playhead
+       within an 8px threshold. **Undo/redo** (`useTimelineHistory.ts`, a
+       ref-based past/future stack — not `useState`, to dodge Strict Mode's
+       double-invoked updaters double-pushing history) backs every edit path
+       (editor edits, video/music/overlay adds, re-sync); Cmd/Ctrl+Z (+Shift
+       for redo) plus toolbar buttons. Scope cuts: no audio `acrossfade`, no
+       fade-from/to-black on the first/last clip, continuous slider drags
+       aren't coalesced into one undo step. Verified: backend 36/36 (5 new
+       transition tests), `tsc -b && vite build` + lint clean, a real
+       `/render` POST frame-sampled a genuine 50/50 blend mid-crossfade
+       (pure red → blend → pure blue, total duration correctly 3+3−1=5s),
+       and zoom/snap/badge/undo-redo driven live in Chrome. Full writeup:
+       [docs/timeline-editor-plan.md](docs/timeline-editor-plan.md) §11.
+     - Remaining: transitions/undo-redo scope cuts above, if ever needed.
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), clip

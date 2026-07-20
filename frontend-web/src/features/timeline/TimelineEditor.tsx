@@ -7,10 +7,13 @@ import {
   isOverlayTrack,
   MAX_ROTATION,
   MAX_ZOOM,
+  maxTransitionDuration,
   MIN_CLIP,
+  MIN_TRANSITION,
   moveClip,
   removeTrack,
   setClipFade,
+  setClipTransition,
   setCrop,
   setMotion,
   setOverlayTransform,
@@ -20,7 +23,8 @@ import {
   trimClip,
   zoomPanFromCrop,
 } from './model/timelineOps';
-import { timelineDuration, type Clip, type KenBurns, type Timeline, type Track, type TrackType } from './model/types';
+import type { Clip, KenBurns, Timeline, Track, TrackType, TransitionStyle } from './model/types';
+import { timelineDuration } from './model/types';
 
 /** Lane display order (top → bottom) and labels. */
 const LANE_ORDER: TrackType[] = ['video', 'photo', 'caption', 'audio'];
@@ -30,6 +34,12 @@ const LANE_LABEL: Record<TrackType, string> = {
   caption: 'Captions',
   audio: 'Audio',
 };
+
+/** Zoom bounds (pixels per timeline second) and the pointer-drag snap threshold in screen px. */
+const MIN_PPS = 20;
+const MAX_PPS = 400;
+const DEFAULT_PPS = 70;
+const SNAP_PX = 8;
 
 function fmt(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -52,6 +62,7 @@ interface TrimDrag {
   edge: 'start' | 'end';
   startX: number;
   laneWidth: number;
+  clipStart: number;
   startDuration: number;
   startInPoint: number;
   duration: number;
@@ -59,36 +70,59 @@ interface TrimDrag {
 }
 
 /**
- * Interactive timeline (Greyvetro Studio Phase 5). Each track is a lane, each clip a bar. Base
- * visual clips can be selected, dragged to reorder, trimmed at either edge, split at the playhead,
- * reframed (zoom/pan) and tilted (rotation), and deleted; the model stays contiguous (the base
- * track is a `concat`). Overlay (PiP/logo) tracks — a photo/video track above the base zIndex,
- * Phase 3c — float freely: one clip, end-trim only, positioned/scaled via its own inspector, like
- * music. Edits are pure (see model/timelineOps.ts) and flow up via onChange for persistence + render.
+ * Interactive timeline (Greyvetro Studio Phase 5/6). Each track is a lane, each clip a bar. Base
+ * visual clips can be selected, dragged to reorder, trimmed at either edge (snapping to nearby
+ * clip edges/the playhead), split at the playhead, reframed (zoom/pan/tilt/motion), given a
+ * crossfade from the clip before them, and deleted; the model stays contiguous (the base track is
+ * a `concat`, or an `xfade` fold where transitions are set). A zoom control scales the ruler/lanes
+ * (pixels-per-second) with independent horizontal scroll, labels pinned. Overlay (PiP/logo) tracks
+ * — a photo/video track above the base zIndex, Phase 3c — float freely: one clip, end-trim only,
+ * positioned/scaled via its own inspector, like music. Edits are pure (see model/timelineOps.ts)
+ * and flow up via onChange for persistence + render; onUndo/onRedo drive the caller's history stack.
  */
 export function TimelineEditor({
   timeline,
   imageUrls,
   audioUrl,
   onChange,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: {
   timeline: Timeline;
   imageUrls: Record<string, string>;
   audioUrl: string | null;
   onChange: (next: Timeline) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }) {
   const total = Math.max(timelineDuration(timeline), 0.001);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedTransition, setSelectedTransition] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [trim, setTrim] = useState<TrimDrag | null>(null);
+  const [snapGuide, setSnapGuide] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [pxPerSecond, setPxPerSecond] = useState(DEFAULT_PPS);
   const dragId = useRef<string | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ t0: number; p0: number } | null>(null);
 
   const ph = Math.min(playhead, total);
+  const pxWidth = Math.max(320, total * pxPerSecond);
+
+  const zoomBy = (factor: number) =>
+    setPxPerSecond((p) => Math.min(MAX_PPS, Math.max(MIN_PPS, p * factor)));
+  const zoomToFit = () => {
+    const width = scrollRef.current?.clientWidth ?? 800;
+    setPxPerSecond(Math.min(MAX_PPS, Math.max(MIN_PPS, width / total)));
+  };
 
   // Playback: a rAF clock advances the playhead (master), the voiceover follows, and the frame
   // preview swaps stills as `ph` moves. Video clips show their poster in preview (motion is an
@@ -174,6 +208,12 @@ export function TimelineEditor({
       ? { track: selTrack, clip: selectedClip }
       : null;
 
+  // A selected transition boundary (Phase 6) opens the transition inspector.
+  const transitionClip = selectedTransition
+    ? timeline.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedTransition) ?? null
+    : null;
+  const transitionMax = selectedTransition ? maxTransitionDuration(timeline, selectedTransition) : 0;
+
   const canSplit =
     selectedIsVisual && localPlayhead > MIN_CLIP && localPlayhead < (selectedClip?.duration ?? 0) - MIN_CLIP;
   const canDelete = (selectedIsVisual && visualCount > 1) || !!selMusic || !!selOverlay;
@@ -197,6 +237,15 @@ export function TimelineEditor({
   // Keep the key handler calling the latest onDelete without re-subscribing on every render.
   const onDeleteRef = useRef(onDelete);
   onDeleteRef.current = onDelete;
+
+  const selectClip = (id: string) => {
+    setSelectedTransition(null);
+    setSelected(id);
+  };
+  const selectTransition = (id: string) => {
+    setSelected(null);
+    setSelectedTransition(id);
+  };
 
   // Frame shown in the preview: the base visual clip under the playhead, plus any active caption.
   // While paused with a base clip selected, the preview locks to that clip so reframe edits are
@@ -270,41 +319,81 @@ export function TimelineEditor({
     if (!selOverlay) return;
     onChange(setOverlayTransform(timeline, selOverlay.clip.id, patch));
   };
+  const applyTransition = (style: TransitionStyle, duration: number) => {
+    if (!transitionClip) return;
+    onChange(setClipTransition(timeline, transitionClip.id, { style, duration }));
+  };
 
-  // Split / delete keyboard shortcuts.
+  // Split / delete / undo-redo keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName?.match(/INPUT|TEXTAREA/)) return;
-      if (e.key === 'Escape') setSelected(null);
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && canDelete) {
+      if (e.key === 'Escape') {
+        setSelected(null);
+        setSelectedTransition(null);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && canDelete) {
         e.preventDefault();
         onDeleteRef.current();
       } else if ((e.key === 's' || e.key === 'S') && canSplit && selected) {
         e.preventDefault();
         stop();
         onChange(splitClip(timeline, selected, localPlayhead));
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        stop();
+        if (e.shiftKey) {
+          if (canRedo) onRedo();
+        } else if (canUndo) onUndo();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [timeline, selected, canDelete, canSplit, localPlayhead, onChange, stop]);
+  }, [timeline, selected, canDelete, canSplit, localPlayhead, onChange, stop, canUndo, canRedo, onUndo, onRedo]);
 
   const timeFromEvent = (e: { clientX: number }, el: HTMLElement): number => {
     const rect = el.getBoundingClientRect();
     return Math.min(Math.max(((e.clientX - rect.left) / rect.width) * total, 0), total);
   };
 
+  // Snap candidates for a trim drag: timeline bounds, the playhead, and every OTHER clip's start/
+  // end across all tracks. Returns the nearest candidate within the pixel threshold, else null.
+  const snapCandidate = (t: number, excludeClipId: string): number | null => {
+    const thresholdSec = SNAP_PX / pxPerSecond;
+    const candidates = [0, total, ph];
+    for (const track of timeline.tracks)
+      for (const c of track.clips) {
+        if (c.id === excludeClipId) continue;
+        candidates.push(c.startTime, c.startTime + c.duration);
+      }
+    let best: number | null = null;
+    let bestDist = thresholdSec;
+    for (const c of candidates) {
+      const d = Math.abs(c - t);
+      if (d <= bestDist) {
+        best = c;
+        bestDist = d;
+      }
+    }
+    return best;
+  };
+
   const onTrimPointerMove = (e: React.PointerEvent) => {
     if (!trim) return;
     const dt = ((e.clientX - trim.startX) / trim.laneWidth) * total;
+    const rawEdge = trim.edge === 'end' ? trim.clipStart + trim.startDuration + dt : trim.clipStart + dt;
+    const snapped = snapCandidate(rawEdge, trim.clipId);
+    setSnapGuide(snapped);
+    const edge = snapped ?? rawEdge;
+
     if (trim.edge === 'end') {
-      setTrim({ ...trim, duration: Math.max(MIN_CLIP, trim.startDuration + dt) });
+      setTrim({ ...trim, duration: Math.max(MIN_CLIP, edge - trim.clipStart) });
     } else {
       // Left edge: keep the right edge fixed — shrink/grow duration, move the source window.
+      const snappedDt = edge - trim.clipStart;
       setTrim({
         ...trim,
-        duration: Math.max(MIN_CLIP, trim.startDuration - dt),
-        inPoint: Math.max(0, trim.startInPoint + dt),
+        duration: Math.max(MIN_CLIP, trim.startDuration - snappedDt),
+        inPoint: Math.max(0, trim.startInPoint + snappedDt),
       });
     }
   };
@@ -312,6 +401,7 @@ export function TimelineEditor({
   const onTrimPointerUp = () => {
     if (trim) onChange(trimClip(timeline, trim.clipId, { inPoint: trim.inPoint, duration: trim.duration }));
     setTrim(null);
+    setSnapGuide(null);
   };
 
   const step = tickStep(total);
@@ -365,6 +455,24 @@ export function TimelineEditor({
             </button>
             <button className="chip" disabled={!canDelete} onClick={onDelete}>
               {selMusic ? '🗑 Remove music' : selOverlay ? '🗑 Remove overlay' : '🗑 Delete'}
+            </button>
+            <button className="chip" disabled={!canUndo} onClick={() => { stop(); onUndo(); }}>
+              ↩ Undo
+            </button>
+            <button className="chip" disabled={!canRedo} onClick={() => { stop(); onRedo(); }}>
+              ↪ Redo
+            </button>
+          </div>
+          <div className="tl-tools-row">
+            <button className="chip" onClick={() => zoomBy(1 / 1.4)}>
+              🔍−
+            </button>
+            <span className="mono tl-zoom-label">{Math.round(pxPerSecond)}px/s</span>
+            <button className="chip" onClick={() => zoomBy(1.4)}>
+              🔍+
+            </button>
+            <button className="chip" onClick={zoomToFit}>
+              Fit
             </button>
           </div>
           <div className="tl-tools-meta mono">
@@ -606,90 +714,185 @@ export function TimelineEditor({
                 <span className="mono">{Math.round((selOverlay.clip.scale ?? 0.3) * 100)}%</span>
               </label>
             </div>
+          ) : transitionClip ? (
+            <div className="tl-transition-inspector">
+              {transitionMax < MIN_TRANSITION ? (
+                <span className="tl-tools-hint">These clips are too short to fit a transition.</span>
+              ) : (
+                <>
+                  <div className="tl-transition-styles">
+                    <button
+                      className={`chip${(transitionClip.transitionIn?.style ?? 'dissolve') === 'dissolve' && transitionClip.transitionIn ? ' active' : ''}`}
+                      onClick={() =>
+                        applyTransition('dissolve', transitionClip.transitionIn?.duration ?? Math.min(0.5, transitionMax))
+                      }
+                    >
+                      Dissolve
+                    </button>
+                    <button
+                      className={`chip${transitionClip.transitionIn?.style === 'fadeToBlack' ? ' active' : ''}`}
+                      onClick={() =>
+                        applyTransition('fadeToBlack', transitionClip.transitionIn?.duration ?? Math.min(0.5, transitionMax))
+                      }
+                    >
+                      Fade to black
+                    </button>
+                  </div>
+                  <label>
+                    Duration
+                    <input
+                      type="range"
+                      min={MIN_TRANSITION}
+                      max={transitionMax}
+                      step={0.05}
+                      value={Math.min(transitionClip.transitionIn?.duration ?? Math.min(0.5, transitionMax), transitionMax)}
+                      onChange={(e) =>
+                        applyTransition(transitionClip.transitionIn?.style ?? 'dissolve', Number(e.target.value))
+                      }
+                    />
+                    <span className="mono">
+                      {Math.min(transitionClip.transitionIn?.duration ?? Math.min(0.5, transitionMax), transitionMax).toFixed(2)}s
+                    </span>
+                  </label>
+                  <button
+                    className="chip"
+                    disabled={!transitionClip.transitionIn}
+                    onClick={() => onChange(setClipTransition(timeline, transitionClip.id, null))}
+                  >
+                    Remove transition
+                  </button>
+                </>
+              )}
+            </div>
           ) : (
             <div className="tl-tools-hint">
-              Click a clip to select · drag to reorder · drag an edge to trim · click the ruler to
-              move the playhead, then Split (S) or Delete. Select a scene to reframe (zoom/pan/tilt)
-              or add Ken Burns motion; add music or an overlay, select it to adjust.
+              Click a clip to select · drag to reorder · drag an edge to trim (snaps to nearby
+              edges/playhead) · click the ruler to move the playhead, then Split (S) or Delete ·
+              Cmd/Ctrl+Z to undo. Select a scene to reframe (zoom/pan/tilt) or add Ken Burns motion;
+              click the boundary between two clips for a transition; add music or an overlay, select
+              it to adjust.
             </div>
           )}
         </div>
       </div>
 
-      <div
-        className="tl-ruler"
-        onPointerDown={(e) => scrubTo(timeFromEvent(e, e.currentTarget))}
-      >
-        {ticks.map((t) => (
-          <span key={t} className="tl-tick mono" style={{ left: `${(t / total) * 100}%` }}>
-            {fmt(t)}
-          </span>
-        ))}
-        <div className="tl-playhead" style={{ left: `${(ph / total) * 100}%` }} />
-      </div>
-
-      {tracks.map((track) => (
-        <div key={track.id} className="tl-lane">
-          <div className="tl-lane-label">{overlay(track.id) ? '🖼 Overlay' : LANE_LABEL[track.type]}</div>
-          <div
-            className="tl-lane-track"
-            onPointerDown={(e) => {
-              // Only bare-track clicks (not on a clip) move the playhead.
-              if (e.target === e.currentTarget) scrubTo(timeFromEvent(e, e.currentTarget));
-            }}
-          >
-            <div className="tl-playhead" style={{ left: `${(ph / total) * 100}%` }} />
-            {[...track.clips]
-              .sort((a, b) => a.startTime - b.startTime)
-              .map((clip, i) => (
-                <ClipBar
-                  key={clip.id}
-                  clip={clip}
-                  index={i}
-                  track={track}
-                  overlay={overlay(track.id)}
-                  total={total}
-                  thumb={imageUrls[clip.sourceId]}
-                  selected={selected === clip.id}
-                  dropTarget={dropTarget === clip.id}
-                  trim={trim?.clipId === clip.id ? trim : null}
-                  onSelect={() => setSelected(clip.id)}
-                  onDragStart={() => {
-                    if (isVisualType(track.type) && !overlay(track.id)) dragId.current = clip.id;
-                  }}
-                  onDragOver={() => {
-                    if (dragId.current && dragId.current !== clip.id) setDropTarget(clip.id);
-                  }}
-                  onDrop={() => {
-                    if (dragId.current && dragId.current !== clip.id) {
-                      stop();
-                      onChange(moveClip(timeline, dragId.current, clip.id));
-                    }
-                    dragId.current = null;
-                    setDropTarget(null);
-                  }}
-                  onTrimStart={(edge, e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    stop();
-                    setSelected(clip.id);
-                    const lane = (e.currentTarget as HTMLElement).closest('.tl-lane-track');
-                    setTrim({
-                      clipId: clip.id,
-                      edge,
-                      startX: e.clientX,
-                      laneWidth: lane?.getBoundingClientRect().width ?? 1,
-                      startDuration: clip.duration,
-                      startInPoint: clip.inPoint,
-                      duration: clip.duration,
-                      inPoint: clip.inPoint,
-                    });
-                  }}
-                />
-              ))}
-          </div>
+      <div className="tl-body">
+        <div className="tl-labels">
+          <div className="tl-ruler-spacer" />
+          {tracks.map((track) => (
+            <div key={track.id} className="tl-lane-label">
+              {overlay(track.id) ? '🖼 Overlay' : LANE_LABEL[track.type]}
+            </div>
+          ))}
         </div>
-      ))}
+
+        <div className="tl-scroll" ref={scrollRef}>
+          <div
+            className="tl-ruler"
+            style={{ width: pxWidth }}
+            onPointerDown={(e) => scrubTo(timeFromEvent(e, e.currentTarget))}
+          >
+            {ticks.map((t) => (
+              <span key={t} className="tl-tick mono" style={{ left: `${(t / total) * 100}%` }}>
+                {fmt(t)}
+              </span>
+            ))}
+            <div className="tl-playhead" style={{ left: `${(ph / total) * 100}%` }} />
+          </div>
+
+          {tracks.map((track) => {
+            const base = isVisualType(track.type) && !overlay(track.id);
+            const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+            return (
+              <div
+                key={track.id}
+                className="tl-lane-track"
+                style={{ width: pxWidth }}
+                onPointerDown={(e) => {
+                  // Only bare-track clicks (not on a clip/badge) move the playhead.
+                  if (e.target === e.currentTarget) scrubTo(timeFromEvent(e, e.currentTarget));
+                }}
+              >
+                <div className="tl-playhead" style={{ left: `${(ph / total) * 100}%` }} />
+                {snapGuide != null && trim?.clipId && sortedClips.some((c) => c.id === trim.clipId) && (
+                  <div className="tl-snap-guide" style={{ left: `${(snapGuide / total) * 100}%` }} />
+                )}
+                {sortedClips.map((clip, i) => (
+                  <ClipBar
+                    key={clip.id}
+                    clip={clip}
+                    index={i}
+                    track={track}
+                    overlay={overlay(track.id)}
+                    total={total}
+                    thumb={imageUrls[clip.sourceId]}
+                    selected={selected === clip.id}
+                    dropTarget={dropTarget === clip.id}
+                    trim={trim?.clipId === clip.id ? trim : null}
+                    onSelect={() => selectClip(clip.id)}
+                    onDragStart={() => {
+                      if (isVisualType(track.type) && !overlay(track.id)) dragId.current = clip.id;
+                    }}
+                    onDragOver={() => {
+                      if (dragId.current && dragId.current !== clip.id) setDropTarget(clip.id);
+                    }}
+                    onDrop={() => {
+                      if (dragId.current && dragId.current !== clip.id) {
+                        stop();
+                        onChange(moveClip(timeline, dragId.current, clip.id));
+                      }
+                      dragId.current = null;
+                      setDropTarget(null);
+                    }}
+                    onTrimStart={(edge, e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      stop();
+                      selectClip(clip.id);
+                      const lane = (e.currentTarget as HTMLElement).closest('.tl-lane-track');
+                      setTrim({
+                        clipId: clip.id,
+                        edge,
+                        startX: e.clientX,
+                        laneWidth: lane?.getBoundingClientRect().width ?? 1,
+                        clipStart: clip.startTime,
+                        startDuration: clip.duration,
+                        startInPoint: clip.inPoint,
+                        duration: clip.duration,
+                        inPoint: clip.inPoint,
+                      });
+                    }}
+                  />
+                ))}
+                {base &&
+                  sortedClips.slice(1).map((clip) => {
+                    const max = maxTransitionDuration(timeline, clip.id);
+                    if (max < MIN_TRANSITION) return null;
+                    return (
+                      <button
+                        key={`xf-${clip.id}`}
+                        type="button"
+                        className={`tl-transition-badge${clip.transitionIn ? ' active' : ''}${selectedTransition === clip.id ? ' selected' : ''}`}
+                        style={{ left: `${(clip.startTime / total) * 100}%` }}
+                        title={
+                          clip.transitionIn
+                            ? `${clip.transitionIn.style === 'fadeToBlack' ? 'Fade to black' : 'Dissolve'} · ${clip.transitionIn.duration.toFixed(2)}s`
+                            : 'Add a transition'
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectTransition(clip.id);
+                        }}
+                      >
+                        ⤭
+                      </button>
+                    );
+                  })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

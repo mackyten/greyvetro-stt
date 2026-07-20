@@ -119,6 +119,34 @@ public record Clip
     /// clip; identical From/To keyframes are a no-op and fall back to the static chain.
     /// </summary>
     public Motion? Motion { get; init; }
+
+    /// <summary>
+    /// Optional crossfade into this base-track clip from the one immediately before it (Phase 6).
+    /// Rendered via ffmpeg <c>xfade</c>, which requires the two clips to overlap by <see
+    /// cref="Transition.Duration"/> seconds — the base track's effective length shrinks by that
+    /// amount at each transition, so the compiler clamps <see cref="Transition.Duration"/> against
+    /// both adjacent clips' own <see cref="Duration"/> rather than trusting it outright. Ignored on
+    /// the first base-track clip (no predecessor to fade from) and on overlay/audio/caption tracks.
+    /// </summary>
+    public Transition? TransitionIn { get; init; }
+}
+
+public enum TransitionStyle
+{
+    /// <summary>Direct cross-dissolve between the two clips (ffmpeg xfade type <c>fade</c>).</summary>
+    Dissolve,
+
+    /// <summary>Fades out to black then in from black (ffmpeg xfade type <c>fadeblack</c>).</summary>
+    FadeToBlack,
+}
+
+/// <summary>A transition into a clip from its predecessor on the base track. See <see cref="Clip.TransitionIn"/>.</summary>
+public record Transition
+{
+    public TransitionStyle Style { get; init; } = TransitionStyle.Dissolve;
+
+    /// <summary>Overlap duration in seconds.</summary>
+    public double Duration { get; init; } = 0.5;
 }
 
 /// <summary>A single Ken Burns keyframe: punch-in factor + normalized (0–1) pan center.</summary>

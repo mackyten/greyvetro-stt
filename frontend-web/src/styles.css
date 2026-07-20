@@ -1394,18 +1394,6 @@ input[type='range'] {
   pointer-events: none;
   z-index: 4;
 }
-.tl-ruler {
-  cursor: pointer;
-}
-
-.tl-ruler {
-  position: relative;
-  height: 18px;
-  /* align with lane tracks: label column width + gap */
-  margin-left: 84px;
-  min-width: 320px;
-}
-
 .tl-tick {
   position: absolute;
   top: 0;
@@ -1418,25 +1406,55 @@ input[type='range'] {
   transform: none;
 }
 
-.tl-lane {
+/* Body: a fixed label column + an independently horizontally-scrolling ruler/lanes column (the
+   zoom control changes .tl-scroll's inner content width, in px-per-second, not the label column). */
+.tl-body {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 12px;
 }
 
-.tl-lane-label {
+.tl-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   flex: 0 0 72px;
-  align-self: center;
+}
+
+.tl-ruler-spacer {
+  height: 18px;
+}
+
+.tl-lane-label {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
   text-align: right;
 }
 
+.tl-scroll {
+  flex: 1;
+  min-width: 0; /* let the flex child shrink below its content width so overflow-x can kick in */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.tl-ruler {
+  position: relative;
+  height: 18px;
+  cursor: pointer;
+  flex: none; /* width is set inline (total * pxPerSecond) — don't let flex override it */
+}
+
 .tl-lane-track {
   position: relative;
-  flex: 1;
-  min-width: 320px;
+  flex: none; /* width is set inline (total * pxPerSecond) — don't let flex override it */
   height: 48px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
@@ -1601,4 +1619,83 @@ input[type='range'] {
   font-weight: 600;
   color: var(--text);
   min-width: 34px;
+}
+
+/* Zoom controls (Phase 6) — pixels-per-second readout between the two chip buttons. */
+.tl-zoom-label {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 52px;
+  text-align: center;
+}
+
+/* Snap guide (Phase 6) — a thin line shown in the lane being trimmed while the dragged edge is
+   snapped to a nearby clip boundary/the playhead. Distinct color from the (pink) playhead. */
+.tl-snap-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--blue-deep);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Transition badge (Phase 6) — sits on the boundary between two base-track clips; click to open
+   the transition inspector. Faint/outlined when no transition is set, filled once one is. */
+.tl-transition-badge {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  margin-top: -9px;
+  z-index: 3;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.tl-transition-badge:hover {
+  border-color: var(--blue-deep);
+  color: var(--blue-deep);
+}
+.tl-transition-badge.active {
+  background: var(--blue-deep);
+  border-color: var(--blue-deep);
+  color: #fff;
+}
+.tl-transition-badge.selected {
+  outline: 2px solid var(--blue-deep);
+  outline-offset: 1px;
+}
+
+.tl-transition-inspector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 440px;
+}
+.tl-transition-inspector label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tl-transition-inspector input[type='range'] {
+  width: 92px;
+}
+.tl-transition-styles {
+  display: flex;
+  gap: 6px;
 }

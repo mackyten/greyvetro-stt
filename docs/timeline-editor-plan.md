@@ -471,8 +471,77 @@ storyboard.
   (5 new tests — lerped zoompan expressions, the no-`-t` input args, the identical-keyframe no-op
   fallback, a video-source clip ignoring Motion), `tsc -b && vite build` + lint clean, and a real
   `/render` POST — a 4s/120-frame clip visibly zoomed + panned between its first and last frame.
-- **Phase 6 — Transitions + polish.** `xfade`/`acrossfade` (gated on §9),
-  timeline snapping/zoom, undo/redo history stack.
+- ✅ **Phase 6 — Transitions + polish (shipped 2026-07-20).** Video crossfades
+  (`xfade`), timeline zoom + snapping, and an undo/redo history stack.
+  - **Transitions.** `Clip.TransitionIn` (`{ style: dissolve|fadeToBlack, duration
+    }`, both `Timeline.cs` and `types.ts`) describes a crossfade into a base-track
+    clip from the one immediately before it. The compiler groups cut-joined clips
+    into segments (unchanged `concat`, still byte-identical with zero transitions
+    — the regression gate) and folds segments pairwise with `xfade`
+    (`AppendBaseTrackAssembly` in `FilterGraphCompiler.cs`), computing each
+    `offset` against the *running combined* duration so multiple transitions
+    chain correctly. `dissolve` → xfade type `fade` (direct cross-dissolve);
+    `fadeToBlack` → `fadeblack`. Duration is clamped server-side to 90% of the
+    *shorter* adjacent clip (dropped below `MinTransitionDuration = 0.1s`) since
+    a crossfade can't outlast either shot — the client (`timelineOps.ts`
+    `clampTransitionDuration`/`MIN_TRANSITION`) mirrors the exact same formula so
+    the editor's re-anchored timeline always matches what renders. Because an
+    `xfade` overlaps two clips, the base track's effective length shrinks by
+    each transition's duration — `reanchor`'s `anchorVisual` pulls each
+    subsequent clip's `startTime` back by its (clamped) overlap, which is also
+    why the timeline's total duration can be shorter than the sum of clip
+    durations from this phase on. Web: a small ⤭ badge sits on the boundary
+    between adjacent base-track clips (only rendered where both clips are long
+    enough to support one); clicking it opens an inspector (style buttons +
+    duration slider + remove), and the clip bars visually overlap by the
+    transition's duration once set (their `left`/`width` are still plain
+    `startTime`/`duration` percentages, so the shrink is automatically WYSIWYG).
+    `splitClip` clears `transitionIn` on the second half (the new interior cut
+    is a plain cut, not a repeat of the original boundary's transition).
+    Verified: 5 new xUnit cases (two-clip dissolve, mixed cut+transition segment
+    grouping, fadeToBlack type mapping, over-long clamped to 90%, too-short
+    dropped) — 36/36 backend total — plus a real `/render` POST: total duration
+    correctly 3+3−1=5s for two 3s clips with a 1s dissolve, frame-sampled pure
+    red before the transition window, a genuine ~50/50 red/blue blend at the
+    window's midpoint, pure blue after. **Scope cut:** only base-track (photo/
+    video) crossfades — no audio `acrossfade` (this product's audio model rarely
+    has multiple sequential same-track clips; voiceover is one clip, music
+    tracks span independently) and no fade-from/to-black on the very first/last
+    clip (no predecessor to overlap with) — both left as later refinements, not
+    wired up.
+  - **Zoom + snapping** (frontend-only). `TimelineEditor` replaced the old
+    percentage-of-container clip layout with an explicit pixels-per-second
+    (`pxPerSecond`, 20–400 range, 🔍−/🔍+/Fit chips) driving a fixed content
+    width (`total * pxPerSecond`); clip/tick/playhead positioning stayed
+    percentage-based (still correct since it's now a percentage of an explicit
+    pixel-width parent) — no coordinate math changed. Track labels moved to a
+    separate non-scrolling `.tl-labels` column beside a new `.tl-scroll`
+    container so only the ruler+lanes scroll horizontally, labels stay pinned.
+    Trimming a clip edge now snaps the dragged edge to the nearest of {0, the
+    timeline end, the playhead, every other clip's start/end across tracks}
+    within an 8px screen threshold (converted to seconds via `pxPerSecond`),
+    showing a `.tl-snap-guide` line when snapped. Verified interactively: a trim
+    drag landing a few px short of another clip's start time snapped to the
+    exact value rather than the raw pixel-derived one.
+  - **Undo/redo.** `useTimelineHistory.ts` — a ref-based history stack (past/
+    future arrays of `Timeline` snapshots, capped at 100), *not* `useState` for
+    the stacks: React 18 Strict Mode double-invokes `setState` updater
+    functions to surface impure ones, which would silently double-push history
+    if past/future were mutated inside a updater. A `useReducer` counter forces
+    the re-render once the refs are already updated; `load`/`set`/`undo`/`redo`
+    are wrapped in `useCallback` with empty deps so they're stable enough to
+    list in `TimelineScreen`'s seeding-effect dependency array. `load()` resets
+    history (initial project seed / project switch); `set()` is what every
+    edit path — the editor's `onChange`, the video/music/overlay file handlers,
+    and re-sync — now goes through instead of a bare `setState`. Cmd/Ctrl+Z
+    (Shift for redo) plus toolbar Undo/Redo buttons, both disabled at the
+    stack's edge. **Known v1 limitation, not engineered around:** continuous
+    slider drags (volume, fade, zoom/pan/tilt, transition duration, overlay
+    position/scale) call `onChange` on every `input` tick, so dragging one
+    slider produces many undo entries instead of one coalesced step — acceptable
+    for v1, a later refinement if it proves annoying in practice.
+  - Verified overall: backend 36/36, `tsc -b && vite build` + lint clean (zero
+    new warnings), and the interactive checks above driven live in Chrome.
 - **Later / separate scope — Video-clip ingestion.** Upload real video as source
   media (probe duration/dimensions, frame-seek preview). Deferred because it's
   greenfield and drives the hardest preview-performance problems.

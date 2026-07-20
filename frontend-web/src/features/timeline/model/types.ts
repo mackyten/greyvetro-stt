@@ -64,6 +64,19 @@ export interface Clip {
   // duration. Stills only (ignored by the backend for a video source). Mutually exclusive with a
   // static crop/rotation on the same clip: when animated, those are ignored for export.
   motion?: { from: KenBurns; to: KenBurns };
+
+  // Crossfade into this base-track clip from the one immediately before it (Phase 6). The compiler
+  // overlaps the two clips by `duration` seconds (ffmpeg `xfade`), so the base track's effective
+  // length shrinks by that much at each transition — `reanchor` accounts for it. Ignored on the
+  // first base-track clip (no predecessor) and on overlay/audio/caption tracks.
+  transitionIn?: TransitionIn;
+}
+
+export type TransitionStyle = 'dissolve' | 'fadeToBlack';
+
+export interface TransitionIn {
+  style: TransitionStyle;
+  duration: number; // seconds, clamped against both adjacent clips' own duration
 }
 
 /** A single Ken Burns keyframe: punch-in factor + normalized (0–1) pan center. */
