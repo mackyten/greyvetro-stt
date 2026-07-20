@@ -238,8 +238,10 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        when the storyboard re-seeds). The clip's own audio is muted in v1
        (voiceover stays the only audio track). Verified: photo+video render →
        6s@30 (180 frames), photo span still / video span motion (frame-diffed);
-       photo-only path byte-identical. Deferred: frame-accurate `<video>` scrub
-       preview, per-clip trim UI, video audio mixing.
+       photo-only path byte-identical. Deferred at the time: frame-accurate
+       `<video>` scrub preview, per-clip trim UI, video audio mixing — the latter
+       two have since shipped (TL Phase 2's trim handles; video audio mixing
+       below). Frame-accurate scrub preview remains deferred.
      - ✅ **TL Phase 2 — Interactive editing** (shipped 2026-07-18): the Timeline
        tab is now an editor (`TimelineEditor.tsx`), not a read-only view. Per-clip
        **select**, **drag-to-reorder** (HTML5 DnD, within a lane), **trim** both
@@ -367,7 +369,22 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        (pure red → blend → pure blue, total duration correctly 3+3−1=5s),
        and zoom/snap/badge/undo-redo driven live in Chrome. Full writeup:
        [docs/timeline-editor-plan.md](docs/timeline-editor-plan.md) §11.
-     - Remaining: transitions/undo-redo scope cuts above, if ever needed.
+     - ✅ **Video-clip own-audio mixing** (shipped 2026-07-20, after Phase 6):
+       closes one of the two items still deferred from the original video-
+       ingestion slice. A base-track video clip can opt in (`Clip.IncludeAudio`)
+       to mix its own embedded audio into the export — previously always muted.
+       The compiler reuses that clip's *own* visual input's `[i:a]` (already
+       `-ss`/`-t` trimmed to its window) as an extra `amix` member instead of
+       adding a new `-i`, so no downstream input indices shift; reuses the
+       clip's existing `Volume`/`FadeIn`/`FadeOut` fields for its own gain/fades
+       (no new numeric fields). Web: selected video clip's reframe inspector
+       gained an "Include this clip's audio" checkbox + Vol/Fade controls.
+       Verified: backend 38/38 (2 new tests), build/lint clean, and a real
+       `/render` POST — silent voiceover + a video clip with an embedded 440Hz
+       tone: exported audio at the noise floor (-39.7dB) during the photo-only
+       window, a clear tone (-23.8dB) exactly during the video's window.
+     - Remaining: frame-accurate `<video>` scrub preview (still deferred);
+       transitions/undo-redo scope cuts above, if ever needed.
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), clip

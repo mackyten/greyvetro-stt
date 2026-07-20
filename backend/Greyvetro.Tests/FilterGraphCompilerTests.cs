@@ -300,6 +300,56 @@ public class FilterGraphCompilerTests
             plan.OutputArgs);
     }
 
+    [Fact]
+    public void Compile_VideoClipWithIncludeAudio_MixesOwnAudioWithVoiceover()
+    {
+        var (timeline, paths) = PhotoPlusVideoCase();
+        timeline = timeline with
+        {
+            Tracks = timeline.Tracks.Select(t => t.Type != TrackType.Video ? t : t with
+            {
+                Clips = [t.Clips[0] with { IncludeAudio = true }],
+            }).ToList(),
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Video's own audio ([1:a], the same input as its visual stream — already trimmed by that
+        // input's own -ss/-t) is mixed in alongside the voiceover ([2:a]), each with its own adelay
+        // placement, instead of the legacy single-voiceover direct-map path.
+        const string expectedFilter =
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0];\n" +
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1];\n" +
+            "[v0][v1]concat=n=2:v=1:a=0[vout];" +
+            "[2:a]anull[a0];" +
+            "[1:a]adelay=3000:all=1[a1];" +
+            "[a0][a1]amix=inputs=2:normalize=0:dropout_transition=0[amixed];[amixed]apad[aout]";
+        Assert.Equal(expectedFilter, Norm(plan.FilterComplex));
+        Assert.Contains("[aout]", plan.OutputArgs);
+    }
+
+    [Fact]
+    public void Compile_VideoClipIncludeAudioWithMutedVoiceoverTrack_SingleMemberApadPath()
+    {
+        var (timeline, paths) = PhotoPlusVideoCase();
+        timeline = timeline with
+        {
+            Tracks = timeline.Tracks.Select(t => t.Type switch
+            {
+                TrackType.Video => t with { Clips = [t.Clips[0] with { IncludeAudio = true }] },
+                TrackType.Audio => t with { Muted = true },
+                _ => t,
+            }).ToList(),
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // The dedicated audio track is muted (contributes nothing), so the video's own audio is the
+        // only mix member — no amix needed, same "single member" shortcut dedicated tracks get.
+        Assert.DoesNotContain("amix", Norm(plan.FilterComplex));
+        Assert.Contains("[1:a]adelay=3000:all=1[a0];[a0]apad[aout]", Norm(plan.FilterComplex));
+    }
+
     // --- Editor structural edits (Phase 2) ---
 
     [Fact]

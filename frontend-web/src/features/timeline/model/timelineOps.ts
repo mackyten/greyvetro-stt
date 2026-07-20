@@ -287,6 +287,33 @@ export function setClipFade(
   };
 }
 
+/** Set a base-track video clip's own-audio mix settings (opt-in inclusion via `includeAudio`, plus
+ * gain/fades reusing the same `volume`/`fadeIn`/`fadeOut` fields audio-track clips use). Ignored
+ * for stills and non-base/non-video tracks. Pure. */
+export function setVideoAudio(
+  timeline: Timeline,
+  clipId: string,
+  patch: { includeAudio?: boolean; volume?: number; fadeIn?: number; fadeOut?: number },
+): Timeline {
+  const track = trackOf(timeline, clipId);
+  if (!track || track.type !== 'video' || !isBaseVisual(timeline, track)) return timeline;
+  return withTrackClips(
+    timeline,
+    track.id,
+    track.clips.map((c) =>
+      c.id === clipId
+        ? {
+            ...c,
+            includeAudio: patch.includeAudio ?? c.includeAudio,
+            volume: patch.volume ?? c.volume,
+            fadeIn: patch.fadeIn ?? c.fadeIn,
+            fadeOut: patch.fadeOut ?? c.fadeOut,
+          }
+        : c,
+    ),
+  );
+}
+
 /** Remove a whole track (used to drop an added music track). Leaves its asset (harmless). Pure. */
 export function removeTrack(timeline: Timeline, trackId: string): Timeline {
   return { ...timeline, tracks: timeline.tracks.filter((t) => t.id !== trackId) };

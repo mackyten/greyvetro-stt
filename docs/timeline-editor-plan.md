@@ -23,9 +23,30 @@ in the actual code (`FfmpegVideoRenderer.cs`, `Program.cs` `/render`,
 > into the base `concat`); the voiceover is `apad`-padded (so `-shortest` = visual
 > length) whenever video is present. Web **🎬 Add video** appends a clip after the
 > scenes; blobs live in IndexedDB **v5** `timelineAssets`. Verified with a mixed
-> photo+video render (photo span still, video span motion, frame-diffed). Still
-> deferred: frame-accurate `<video>` scrub preview, per-clip trim UI, mixing the
-> video's own audio. Phases 2–6 below are the remaining work.
+> photo+video render (photo span still, video span motion, frame-diffed). Per-clip
+> trim UI landed with Phase 2's general trim handles (stills change `duration`;
+> video also moves `inPoint`/`outPoint`); mixing the video's own audio landed after
+> Phase 6 (below). Still deferred: frame-accurate `<video>` scrub preview.
+>
+> **Video-clip own-audio mixing shipped (2026-07-20, after Phase 6).** A base-
+> track video clip can opt in (`Clip.IncludeAudio`) to mix its own embedded audio
+> alongside the voiceover/music — previously always muted. The compiler reuses
+> that clip's *existing* visual input's `[i:a]` stream (already `-ss`/`-t` trimmed
+> to the clip's window by the same input) as an extra member of the existing
+> multi-track audio mix (`amix`), rather than adding a new `-i` — so it doesn't
+> shift any downstream overlay/caption input indices, and the single-plain-
+> voiceover legacy path is preserved when no clip opts in. Reuses the clip's own
+> `Volume`/`FadeIn`/`FadeOut` fields (already generic on `Clip`) for the embedded
+> audio's own gain/fades — no new numeric fields needed, just the one boolean.
+> Web: a selected video clip's reframe inspector gained an "Include this clip's
+> audio" checkbox, revealing Vol/Fade-in/Fade-out controls when checked. Verified:
+> 2 new xUnit cases (38/38 backend total — mixed with a dedicated voiceover, and
+> alone when the voiceover track is muted, both checking the exact emitted
+> `adelay`/`amix`/`apad` graph), `tsc -b && vite build` + lint clean, and a real
+> `/render` POST — a silent voiceover + a video clip with an embedded 440Hz tone:
+> the exported audio sat at a silence noise floor (-39.7dB mean) during the
+> photo-only window and jumped to a clear tone (-23.8dB mean) exactly during the
+> video's window. Phases 2–6 below are the remaining work.
 
 ---
 

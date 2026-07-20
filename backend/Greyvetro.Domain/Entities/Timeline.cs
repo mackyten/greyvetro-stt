@@ -103,10 +103,19 @@ public record Clip
 
     // --- Audio ---
 
-    /// <summary>0–1 gain for an individual audio clip (null = unity).</summary>
+    /// <summary>0–1 gain for an individual audio clip (null = unity). Also doubles as the mix gain
+    /// for a base-track video clip's own audio when <see cref="IncludeAudio"/> is set.</summary>
     public double? Volume { get; init; }
     public double? FadeIn { get; init; }
     public double? FadeOut { get; init; }
+
+    /// <summary>
+    /// Opt-in to mix a base-track video clip's own embedded audio alongside the voiceover/music
+    /// (default false — a video clip is silent by default, matching pre-existing behavior/saved
+    /// timelines). Ignored for stills and non-base tracks. Uses this same clip's <see
+    /// cref="Volume"/>/<see cref="FadeIn"/>/<see cref="FadeOut"/> for its own mix gain/fades.
+    /// </summary>
+    public bool IncludeAudio { get; init; }
 
     /// <summary>Caption clips carry text; it is rasterized to an overlay at export (later phases).</summary>
     public string? Text { get; init; }

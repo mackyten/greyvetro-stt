@@ -77,8 +77,10 @@ public class FilterGraphCompiler
 
             if (isVideo)
             {
-                // Real video: input-seek to the trim in-point and read `duration` seconds. The
-                // clip's own audio is ignored (v1 keeps the voiceover as the only audio track).
+                // Real video: input-seek to the trim in-point and read `duration` seconds. Its own
+                // audio is muted by default (this same input's `[i:a]` is already trimmed to exactly
+                // this clip's window, so opting in via IncludeAudio just mixes that stream in below —
+                // no separate input needed).
                 hasVideo = true;
                 inputs.AddRange(["-ss", FfmpegProcess.Fmt(clip.InPoint), "-t", duration, "-i", path!]);
             }
@@ -116,14 +118,26 @@ public class FilterGraphCompiler
             .Where(p => assetPaths.ContainsKey(p.Clip.SourceId))
             .OrderBy(p => p.Clip.StartTime)
             .ToList();
-        if (audioParts.Count == 0)
+
+        // Base-track video clips that opted in to mixing their own embedded audio (IncludeAudio).
+        // Each reuses its already-added visual input's `[i:a]` stream — no separate `-i` needed,
+        // since that input's `-ss`/`-t` already trims the audio to exactly this clip's window.
+        var videoAudioParts = new List<(Clip Clip, int InputIndex)>();
+        for (var i = 0; i < visualClips.Count; i++)
+        {
+            var clip = visualClips[i];
+            if (clip.IncludeAudio && assetPaths.ContainsKey(clip.SourceId) && TypeOf(clip.SourceId) == MediaType.Video)
+                videoAudioParts.Add((clip, i));
+        }
+
+        if (audioParts.Count == 0 && videoAudioParts.Count == 0)
             throw new ArgumentException("The audio track has no (supplied, unmuted) clips.");
 
         string audioMap;
         int audioInputCount;
-        var first = audioParts[0].Clip;
-        var isSimpleVoiceover = audioParts.Count == 1
-            && first.StartTime == 0 && first.InPoint == 0
+        var first = audioParts.Count > 0 ? audioParts[0].Clip : null;
+        var isSimpleVoiceover = audioParts.Count == 1 && videoAudioParts.Count == 0
+            && first!.StartTime == 0 && first.InPoint == 0
             && first.Volume is null && first.FadeIn is null && first.FadeOut is null
             && audioParts[0].TrackVolume is null;
 
@@ -132,7 +146,7 @@ public class FilterGraphCompiler
             // Legacy path: map the single voiceover stream directly (apad only when video can outrun
             // it, so -shortest stops at the visual concat). Byte-for-similar with the pre-audio phases.
             var audioIndex = visualClips.Count;
-            inputs.AddRange(["-i", assetPaths[first.SourceId]]);
+            inputs.AddRange(["-i", assetPaths[first!.SourceId]]);
             audioMap = hasVideo ? "[aout]" : $"{audioIndex}:a";
             if (hasVideo)
                 filters.Append($";[{audioIndex}:a]apad[aout]");
@@ -142,38 +156,34 @@ public class FilterGraphCompiler
         {
             // Mix path: apad the mix so -shortest always stops at the visual length (the master).
             var audio = new StringBuilder();
+            var totalMembers = audioParts.Count + videoAudioParts.Count;
+            var label = 0;
             for (var k = 0; k < audioParts.Count; k++)
             {
                 var (clip, trackVolume) = audioParts[k];
                 var idx = visualClips.Count + k;
                 inputs.AddRange(["-ss", FfmpegProcess.Fmt(clip.InPoint), "-t", FfmpegProcess.Fmt(clip.Duration),
                     "-i", assetPaths[clip.SourceId]]);
-
-                var chain = new List<string>();
-                var volume = EffectiveVolume(clip.Volume, trackVolume);
-                if (volume is not null && Math.Abs(volume.Value - 1.0) > 1e-9)
-                    chain.Add($"volume={FfmpegProcess.Fmt(volume.Value)}");
-                if (clip.FadeIn is > 0)
-                    chain.Add($"afade=t=in:st=0:d={FfmpegProcess.Fmt(clip.FadeIn.Value)}");
-                if (clip.FadeOut is > 0)
-                    chain.Add($"afade=t=out:st={FfmpegProcess.Fmt(Math.Max(0, clip.Duration - clip.FadeOut.Value))}:d={FfmpegProcess.Fmt(clip.FadeOut.Value)}");
-                var delayMs = (long)Math.Round(clip.StartTime * 1000);
-                if (delayMs > 0)
-                    chain.Add($"adelay={delayMs}:all=1");
-                if (chain.Count == 0)
-                    chain.Add("anull");
-                audio.Append($";[{idx}:a]{string.Join(",", chain)}[a{k}]");
+                audio.Append($";[{idx}:a]{BuildAudioChain(clip, trackVolume)}[a{label}]");
+                label++;
+            }
+            foreach (var (clip, inputIndex) in videoAudioParts)
+            {
+                audio.Append($";[{inputIndex}:a]{BuildAudioChain(clip, trackVolume: null)}[a{label}]");
+                label++;
             }
 
-            if (audioParts.Count == 1)
+            if (totalMembers == 1)
                 audio.Append(";[a0]apad[aout]");
             else
                 audio.Append(';')
-                    .Append(string.Concat(Enumerable.Range(0, audioParts.Count).Select(k => $"[a{k}]")))
-                    .Append($"amix=inputs={audioParts.Count}:normalize=0:dropout_transition=0[amixed];[amixed]apad[aout]");
+                    .Append(string.Concat(Enumerable.Range(0, totalMembers).Select(k => $"[a{k}]")))
+                    .Append($"amix=inputs={totalMembers}:normalize=0:dropout_transition=0[amixed];[amixed]apad[aout]");
 
             filters.Append(audio);
             audioMap = "[aout]";
+            // Only the dedicated audio-track clips added NEW inputs (video-audio reuses an existing
+            // one), so this is what downstream overlay/caption index math must offset past.
             audioInputCount = audioParts.Count;
         }
 
@@ -368,6 +378,29 @@ public class FilterGraphCompiler
     /// <summary>Clip gain × track gain, or null when neither is set (unity — no filter emitted).</summary>
     private static double? EffectiveVolume(double? clipVolume, double? trackVolume) =>
         clipVolume is null && trackVolume is null ? null : (clipVolume ?? 1.0) * (trackVolume ?? 1.0);
+
+    /// <summary>
+    /// The <c>volume,afade,adelay</c> chain for one audio mix member — a dedicated audio-track clip
+    /// (<paramref name="trackVolume"/> from its track) or a base-track video clip's own embedded
+    /// audio (<paramref name="trackVolume"/> null, since there's no track-level gain to fold in).
+    /// </summary>
+    private static string BuildAudioChain(Clip clip, double? trackVolume)
+    {
+        var chain = new List<string>();
+        var volume = EffectiveVolume(clip.Volume, trackVolume);
+        if (volume is not null && Math.Abs(volume.Value - 1.0) > 1e-9)
+            chain.Add($"volume={FfmpegProcess.Fmt(volume.Value)}");
+        if (clip.FadeIn is > 0)
+            chain.Add($"afade=t=in:st=0:d={FfmpegProcess.Fmt(clip.FadeIn.Value)}");
+        if (clip.FadeOut is > 0)
+            chain.Add($"afade=t=out:st={FfmpegProcess.Fmt(Math.Max(0, clip.Duration - clip.FadeOut.Value))}:d={FfmpegProcess.Fmt(clip.FadeOut.Value)}");
+        var delayMs = (long)Math.Round(clip.StartTime * 1000);
+        if (delayMs > 0)
+            chain.Add($"adelay={delayMs}:all=1");
+        if (chain.Count == 0)
+            chain.Add("anull");
+        return string.Join(",", chain);
+    }
 
     /// <summary>
     /// A leading <c>crop=…,</c> filter (with trailing comma) for a normalized source crop, or empty

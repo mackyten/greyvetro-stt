@@ -19,6 +19,7 @@ import {
   setOverlayTransform,
   setRotation,
   setTrackAudio,
+  setVideoAudio,
   splitClip,
   trimClip,
   zoomPanFromCrop,
@@ -195,6 +196,7 @@ export function TimelineEditor({
     ? timeline.tracks.find((t) => t.clips.some((c) => c.id === selected)) ?? null
     : null;
   const selectedIsVisual = !!selectedClip && !!selTrack && isVisualType(selTrack.type) && !overlay(selTrack.id);
+  const selectedIsVideo = selectedIsVisual && selTrack?.type === 'video';
   const localPlayhead = selectedClip ? ph - selectedClip.startTime : 0;
 
   // A selected music clip (an audio clip that isn't the seeded voiceover) opens the audio inspector.
@@ -318,6 +320,10 @@ export function TimelineEditor({
   const applyOverlayTransform = (patch: { position?: { x: number; y: number }; scale?: number }) => {
     if (!selOverlay) return;
     onChange(setOverlayTransform(timeline, selOverlay.clip.id, patch));
+  };
+  const applyVideoAudio = (patch: { includeAudio?: boolean; volume?: number; fadeIn?: number; fadeOut?: number }) => {
+    if (!selectedClip) return;
+    onChange(setVideoAudio(timeline, selectedClip.id, patch));
   };
   const applyTransition = (style: TransitionStyle, duration: number) => {
     if (!transitionClip) return;
@@ -676,6 +682,54 @@ export function TimelineEditor({
               <button className="chip" onClick={() => onChange(setMotion(timeline, selectedClip.id, DEFAULT_MOTION))}>
                 🎥 Add motion
               </button>
+              {selectedIsVideo && (
+                <>
+                  <label className="tl-check">
+                    <input
+                      type="checkbox"
+                      checked={!!selectedClip.includeAudio}
+                      onChange={(e) => applyVideoAudio({ includeAudio: e.target.checked })}
+                    />
+                    Include this clip's audio
+                  </label>
+                  {selectedClip.includeAudio && (
+                    <>
+                      <label>
+                        Vol
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={selectedClip.volume ?? 1}
+                          onChange={(e) => applyVideoAudio({ volume: Number(e.target.value) })}
+                        />
+                        <span className="mono">{Math.round((selectedClip.volume ?? 1) * 100)}%</span>
+                      </label>
+                      <label>
+                        Fade in
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={selectedClip.fadeIn ?? 0}
+                          onChange={(e) => applyVideoAudio({ fadeIn: Math.max(0, Number(e.target.value)) })}
+                        />
+                      </label>
+                      <label>
+                        Fade out
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={selectedClip.fadeOut ?? 0}
+                          onChange={(e) => applyVideoAudio({ fadeOut: Math.max(0, Number(e.target.value)) })}
+                        />
+                      </label>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           ) : selOverlay ? (
             <div className="tl-transform-inspector">

@@ -57,6 +57,11 @@ export interface Clip {
   fadeIn?: number;
   fadeOut?: number;
 
+  // Opt-in to mix a base-track video clip's own embedded audio alongside the voiceover/music
+  // (default false/undefined — silent, matching pre-existing behavior). Ignored for stills and
+  // non-base tracks. Uses this same clip's volume/fadeIn/fadeOut above for its own mix gain/fades.
+  includeAudio?: boolean;
+
   // Caption clips carry text; rasterized to an alpha overlay at export (Phase 3+).
   text?: string;
 
