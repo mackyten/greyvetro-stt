@@ -1,0 +1,15 @@
+{
+  "projectId": "c0de916e-6fc7-41a8-8428-67b30fbab45b",
+  "shape": "package",
+  "pkg": "@greyvetro/ui",
+  "globalName": "GreyvetroUI",
+  "buildCmd": "node frontend-web/design-system/build.mjs",
+  "cssEntry": "styles.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "Modal": { "cardMode": "single", "viewport": "660x560" },
+    "Menu": { "cardMode": "single", "viewport": "300x260" },
+    "Banner": { "cardMode": "column" },
+    "AudioPlayer": { "cardMode": "column" }
+  }
+}

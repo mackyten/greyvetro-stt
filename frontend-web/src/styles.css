@@ -1331,6 +1331,7 @@ input[type='range'] {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 90ms ease-out;
 }
 .tl-preview-empty {
   display: flex;
@@ -1540,7 +1541,8 @@ input[type='range'] {
 }
 
 /* Audio inspector shown when a music clip is selected. */
-.tl-audio-inspector {
+.tl-audio-inspector,
+.tl-transform-inspector {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1549,12 +1551,14 @@ input[type='range'] {
   color: var(--muted);
   max-width: 440px;
 }
-.tl-audio-inspector label {
+.tl-audio-inspector label,
+.tl-transform-inspector label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.tl-audio-inspector input[type='range'] {
+.tl-audio-inspector input[type='range'],
+.tl-transform-inspector input[type='range'] {
   width: 92px;
 }
 .tl-audio-inspector input[type='number'] {

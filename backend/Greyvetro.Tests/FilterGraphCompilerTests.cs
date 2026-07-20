@@ -521,4 +521,43 @@ public class FilterGraphCompilerTests
         Assert.DoesNotContain("overlay", Norm(plan.FilterComplex));
         Assert.Contains("[vout]", plan.OutputArgs);
     }
+
+    // --- Per-clip crop / reframe (Phase 3b) ---
+
+    [Fact]
+    public void Compile_ClipWithCrop_PrependsSourceCropBeforeCoverFit()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        // Centered half-size region ≈ a 2× punch-in on the first clip.
+        clips[0] = clips[0] with { Crop = new CropRect { X = 0.25, Y = 0.25, Width = 0.5, Height = 0.5 } };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // The cropped clip crops the source region first, THEN cover-fits it to the output.
+        Assert.Contains(
+            "[0:v]crop=iw*0.5:ih*0.5:iw*0.25:ih*0.25,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v0]",
+            Norm(plan.FilterComplex));
+        // Un-cropped clips stay byte-identical to the legacy chain.
+        Assert.Contains(
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1]",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_FullFrameCrop_IsANoOp()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[0] = clips[0] with { Crop = new CropRect { X = 0, Y = 0, Width = 1, Height = 1 } };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // A full-frame crop must not emit a crop=iw*… prefix (keeps the un-transformed graph).
+        Assert.DoesNotContain("iw*", Norm(plan.FilterComplex));
+    }
 }

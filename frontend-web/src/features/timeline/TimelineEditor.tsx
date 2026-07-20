@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { VOICEOVER_ASSET_ID } from './model/seed';
 import {
+  cropFromZoomPan,
   deleteClip,
+  MAX_ZOOM,
   MIN_CLIP,
   moveClip,
   removeTrack,
   setClipFade,
+  setCrop,
   setTrackAudio,
   splitClip,
   trimClip,
+  zoomPanFromCrop,
 } from './model/timelineOps';
 import { timelineDuration, type Clip, type Timeline, type Track, type TrackType } from './model/types';
 
@@ -177,12 +181,31 @@ export function TimelineEditor({
   const onDeleteRef = useRef(onDelete);
   onDeleteRef.current = onDelete;
 
-  // Frame shown in the preview: the visual clip under the playhead, plus any active caption.
+  // Frame shown in the preview: the visual clip under the playhead, plus any active caption. While
+  // paused with a visual clip selected, the preview locks to that clip so reframe edits are WYSIWYG.
   const activeVisual = visualClips.find((c) => ph >= c.startTime && ph < c.startTime + c.duration)
     ?? visualClips[visualClips.length - 1];
+  const previewClip = !playing && selectedIsVisual && selectedClip ? selectedClip : activeVisual;
   const activeCaption = timeline.tracks
     .find((t) => t.type === 'caption')
     ?.clips.find((c) => ph >= c.startTime && ph < c.startTime + c.duration)?.text;
+
+  // Reflect a clip's crop/reframe in the preview as a CSS zoom into its pan-center (approximate —
+  // the exact source-crop cover-fit happens at export; §4 preview is for feedback, not parity).
+  const cropStyle = previewClip?.crop
+    ? {
+        transform: `scale(${(1 / previewClip.crop.width).toFixed(4)})`,
+        transformOrigin: `${((previewClip.crop.x + previewClip.crop.width / 2) * 100).toFixed(2)}% ${((previewClip.crop.y + previewClip.crop.height / 2) * 100).toFixed(2)}%`,
+      }
+    : undefined;
+
+  // Reframe inspector state for a selected visual clip (zoom + pan-center <-> the stored crop rect).
+  const zoomPan = selectedIsVisual && selectedClip ? zoomPanFromCrop(selectedClip.crop) : null;
+  const applyCrop = (zoom: number, panX: number, panY: number) => {
+    if (!selectedClip) return;
+    // Zoom back to 1 clears the crop (full frame); otherwise store the derived rect.
+    onChange(setCrop(timeline, selectedClip.id, zoom <= 1.001 ? null : cropFromZoomPan(zoom, panX, panY)));
+  };
 
   // Split / delete keyboard shortcuts.
   useEffect(() => {
@@ -236,8 +259,8 @@ export function TimelineEditor({
       <audio ref={audioElRef} src={audioUrl ?? undefined} preload="auto" />
       <div className="tl-head">
         <div className="tl-preview" aria-hidden>
-          {activeVisual && imageUrls[activeVisual.sourceId] ? (
-            <img src={imageUrls[activeVisual.sourceId]} alt="" />
+          {previewClip && imageUrls[previewClip.sourceId] ? (
+            <img src={imageUrls[previewClip.sourceId]} alt="" style={cropStyle} />
           ) : (
             <div className="tl-preview-empty">🎬</div>
           )}
@@ -323,10 +346,57 @@ export function TimelineEditor({
                 />
               </label>
             </div>
+          ) : zoomPan && selectedClip ? (
+            <div className="tl-transform-inspector">
+              <label>
+                Zoom
+                <input
+                  type="range"
+                  min={1}
+                  max={MAX_ZOOM}
+                  step={0.05}
+                  value={zoomPan.zoom}
+                  onChange={(e) => applyCrop(Number(e.target.value), zoomPan.panX, zoomPan.panY)}
+                />
+                <span className="mono">{zoomPan.zoom.toFixed(2)}×</span>
+              </label>
+              <label>
+                Pan X
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.02}
+                  value={zoomPan.panX}
+                  disabled={zoomPan.zoom <= 1.001}
+                  onChange={(e) => applyCrop(zoomPan.zoom, Number(e.target.value), zoomPan.panY)}
+                />
+              </label>
+              <label>
+                Pan Y
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.02}
+                  value={zoomPan.panY}
+                  disabled={zoomPan.zoom <= 1.001}
+                  onChange={(e) => applyCrop(zoomPan.zoom, zoomPan.panX, Number(e.target.value))}
+                />
+              </label>
+              <button
+                className="chip"
+                disabled={!selectedClip.crop}
+                onClick={() => onChange(setCrop(timeline, selectedClip.id, null))}
+              >
+                Reset framing
+              </button>
+            </div>
           ) : (
             <div className="tl-tools-hint">
               Click a clip to select · drag to reorder · drag an edge to trim · click the ruler to
-              move the playhead, then Split (S) or Delete. Add music, select it to set volume/fades.
+              move the playhead, then Split (S) or Delete. Select a scene to reframe (zoom/pan); add
+              music, select it to set volume/fades.
             </div>
           )}
         </div>

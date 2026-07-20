@@ -85,8 +85,9 @@ public class FilterGraphCompiler
                     $"color=c={PlaceholderColor}:s={w}x{h}:r={fps}"]);
             }
 
-            // Same normalization for stills and video: cover-fit to the output frame at target fps.
-            filters.Append($"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,")
+            // Optional reframe: crop a normalized source region first (zoom/pan), then cover-fit.
+            // Full-frame/absent crop emits nothing, so an un-transformed clip stays byte-identical.
+            filters.Append($"[{i}:v]{CropPrefix(clip.Crop)}scale={w}:{h}:force_original_aspect_ratio=increase,")
                 .Append($"crop={w}:{h},setsar=1,fps={fps}")
                 .AppendLine($"[v{i}];");
         }
@@ -217,4 +218,17 @@ public class FilterGraphCompiler
     /// <summary>Clip gain × track gain, or null when neither is set (unity — no filter emitted).</summary>
     private static double? EffectiveVolume(double? clipVolume, double? trackVolume) =>
         clipVolume is null && trackVolume is null ? null : (clipVolume ?? 1.0) * (trackVolume ?? 1.0);
+
+    /// <summary>
+    /// A leading <c>crop=…,</c> filter (with trailing comma) for a normalized source crop, or empty
+    /// when the crop is absent or the full frame. Expressed with <c>iw</c>/<c>ih</c> so it's
+    /// independent of the source's pixel dimensions.
+    /// </summary>
+    private static string CropPrefix(CropRect? crop)
+    {
+        if (crop is null || (crop.X <= 0 && crop.Y <= 0 && crop.Width >= 1 && crop.Height >= 1))
+            return string.Empty;
+        return $"crop=iw*{FfmpegProcess.Fmt(crop.Width)}:ih*{FfmpegProcess.Fmt(crop.Height)}:" +
+               $"iw*{FfmpegProcess.Fmt(crop.X)}:ih*{FfmpegProcess.Fmt(crop.Y)},";
+    }
 }

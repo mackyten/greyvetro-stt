@@ -224,6 +224,46 @@ export function removeTrack(timeline: Timeline, trackId: string): Timeline {
   return { ...timeline, tracks: timeline.tracks.filter((t) => t.id !== trackId) };
 }
 
+/** Deepest punch-in the reframe control allows. */
+export const MAX_ZOOM = 3;
+
+type Crop = NonNullable<Clip['crop']>;
+
+/**
+ * A normalized crop rect from an intuitive zoom (1–MAX_ZOOM) + pan-center (0–1). Equal normalized
+ * width/height preserve the source aspect, so the crop cover-fits to the output as a uniform
+ * zoom regardless of the source's shape. The pan-center is clamped so the box stays in-bounds.
+ */
+export function cropFromZoomPan(zoom: number, panX: number, panY: number): Crop {
+  const z = clamp(zoom, 1, MAX_ZOOM);
+  const size = 1 / z;
+  return {
+    x: clamp(panX - size / 2, 0, 1 - size),
+    y: clamp(panY - size / 2, 0, 1 - size),
+    width: size,
+    height: size,
+  };
+}
+
+/** Inverse of {@link cropFromZoomPan}: the zoom + pan-center a crop represents (drives the sliders). */
+export function zoomPanFromCrop(crop: Clip['crop']): { zoom: number; panX: number; panY: number } {
+  if (!crop || crop.width <= 0) return { zoom: 1, panX: 0.5, panY: 0.5 };
+  return { zoom: 1 / crop.width, panX: crop.x + crop.width / 2, panY: crop.y + crop.height / 2 };
+}
+
+/** Set (or clear, with null / a full-frame rect) a visual clip's crop/reframe. Pure. */
+export function setCrop(timeline: Timeline, clipId: string, crop: Crop | null): Timeline {
+  const track = trackOf(timeline, clipId);
+  if (!track || !isVisual(track)) return timeline;
+  const isFull =
+    !crop || (crop.x <= 0 && crop.y <= 0 && crop.width >= 1 && crop.height >= 1);
+  return withTrackClips(
+    timeline,
+    track.id,
+    track.clips.map((c) => (c.id === clipId ? { ...c, crop: isFull ? undefined : crop } : c)),
+  );
+}
+
 function withTrackClips(timeline: Timeline, trackId: string, clips: Clip[]): Timeline {
   return { ...timeline, tracks: timeline.tracks.map((t) => (t.id === trackId ? { ...t, clips } : t)) };
 }

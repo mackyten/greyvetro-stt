@@ -74,6 +74,14 @@ public record Clip
     public double InPoint { get; init; }
     public double OutPoint { get; init; }
 
+    // --- Transform (non-destructive, normalized 0–1) ---
+
+    /// <summary>
+    /// Optional crop/reframe of the source, applied before the cover-fit so a still or video clip
+    /// can be zoomed/panned. Normalized 0–1 of the source; full-frame or null = no crop.
+    /// </summary>
+    public CropRect? Crop { get; init; }
+
     // --- Audio ---
 
     /// <summary>0–1 gain for an individual audio clip (null = unity).</summary>
@@ -83,6 +91,18 @@ public record Clip
 
     /// <summary>Caption clips carry text; it is rasterized to an overlay at export (later phases).</summary>
     public string? Text { get; init; }
+}
+
+/// <summary>
+/// A normalized (0–1) crop region of a clip's source, applied before the cover-fit so the clip can
+/// be reframed/zoomed. Full-frame (0,0,1,1) is a no-op. See docs/timeline-editor-plan.md §3.
+/// </summary>
+public record CropRect
+{
+    public double X { get; init; }
+    public double Y { get; init; }
+    public double Width { get; init; } = 1;
+    public double Height { get; init; } = 1;
 }
 
 public enum MediaType
