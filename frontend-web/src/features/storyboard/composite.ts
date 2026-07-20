@@ -21,6 +21,7 @@ export async function compositeFrame(
   captions: boolean,
 ): Promise<Blob> {
   await document.fonts.load(CAPTION_FONT_SPEC).catch(() => {});
+  await document.fonts.load("96px 'Material Icons'").catch(() => {});
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -39,9 +40,10 @@ export async function compositeFrame(
     bmp.close();
   } else {
     ctx.fillStyle = '#2E343D';
-    ctx.font = '600 96px Manrope, sans-serif';
+    ctx.font = "96px 'Material Icons'";
     ctx.textAlign = 'center';
-    ctx.fillText('🎬', W / 2, H / 2);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('movie', W / 2, H / 2);
   }
 
   if (captions && narration.trim()) drawCaption(ctx, narration.trim(), W, H);

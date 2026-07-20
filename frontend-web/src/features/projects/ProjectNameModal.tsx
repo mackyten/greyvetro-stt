@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../../core/Icon';
 
 interface Props {
   title: string; // "New project" | "Rename project"
@@ -22,7 +23,7 @@ export function ProjectNameModal({ title, initialName = '', onSubmit, onClose }:
         <div className="modal-header">
           <h2>{title}</h2>
           <button className="icon-btn" title="Close" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">

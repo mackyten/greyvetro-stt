@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getVoices } from '../../core/api';
+import { Icon } from '../../core/Icon';
 import { voiceTagline, type Voice } from '../../core/types';
 import { CreateVoiceModal } from './CreateVoiceModal';
 
@@ -55,10 +56,10 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
             <h2>Choose a voice</h2>
             <div style={{ display: 'flex', gap: 4 }}>
               <button className="icon-btn" title="Refresh voices" onClick={load}>
-                ↻
+                <Icon name="refresh" />
               </button>
               <button className="icon-btn" title="Close" onClick={onClose}>
-                ✕
+                <Icon name="close" />
               </button>
             </div>
           </div>

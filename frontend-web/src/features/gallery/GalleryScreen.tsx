@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { useEffect, useState } from 'react';
 import { transcribeAudio } from '../../core/api';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import {
   settingsSummary,
@@ -216,33 +217,41 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
             className={`chip${filter === p.id ? ' active' : ''}`}
             onClick={() => setFilter(p.id)}
           >
-            📁 {p.name}
+            <Icon name="folder" /> {p.name}
           </button>
         ))}
         <button className="chip" onClick={() => setProjectModal('create')}>
-          ＋ New project
+          <Icon name="add" /> New project
         </button>
         <div className="chip-row-spacer" />
         {activeProject && (
           <>
             <button className="icon-btn" title="Rename project" onClick={() => setProjectModal('rename')}>
-              ✎
+              <Icon name="edit" />
             </button>
             <button className="icon-btn" title="Delete project" onClick={deleteActive}>
-              🗑
+              <Icon name="delete" />
             </button>
           </>
         )}
         {visible.length > 0 && (
           <button className="chip" disabled={zipping} onClick={downloadZip}>
-            {zipping ? 'Zipping…' : '⬇ Download all (zip)'}
+            {zipping ? (
+              'Zipping…'
+            ) : (
+              <>
+                <Icon name="download" /> Download all (zip)
+              </>
+            )}
           </button>
         )}
       </div>
 
       {visible.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">🎧</div>
+          <div className="empty-icon">
+            <Icon name="headphones" />
+          </div>
           <h2>{filter === 'all' ? 'Nothing here yet' : 'No clips in this view'}</h2>
           <p>
             {filter === 'all'
@@ -277,7 +286,10 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
                         setRenamingId(item.id);
                       }}
                     >
-                      {clipTitle(item)} <span className="rename-hint">✎</span>
+                      {clipTitle(item)}{' '}
+                      <span className="rename-hint">
+                        <Icon name="edit" />
+                      </span>
                     </button>
                   )}
                   <div className="vtag">
@@ -290,7 +302,7 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
                     title="More"
                     onClick={() => setMenuFor((m) => (m === item.id ? null : item.id))}
                   >
-                    ⋯
+                    <Icon name="more_horiz" />
                   </button>
                   {menuFor === item.id && (
                     <div className="preset-menu">
@@ -345,18 +357,20 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
               )}
               <div className="card-actions">
                 <button className="chip" onClick={() => onEditRegenerate(item)}>
-                  ✎ Edit & regenerate
+                  <Icon name="edit" /> Edit & regenerate
                 </button>
                 <button
                   className="chip"
                   disabled={transcribingId === item.id}
                   onClick={() => transcribe(item)}
                 >
-                  {transcribingId === item.id
-                    ? 'Transcribing…'
-                    : item.transcript
-                      ? '📝 Transcript'
-                      : '📝 Transcribe'}
+                  {transcribingId === item.id ? (
+                    'Transcribing…'
+                  ) : (
+                    <>
+                      <Icon name="description" /> {item.transcript ? 'Transcript' : 'Transcribe'}
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -396,7 +410,7 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
             <div className="modal-header">
               <h2>Move to project</h2>
               <button className="icon-btn" title="Close" onClick={() => setMovingItem(null)}>
-                ✕
+                <Icon name="close" />
               </button>
             </div>
             <div className="modal-body">
@@ -412,7 +426,9 @@ export function GalleryScreen({ onEditRegenerate, onUseSettings }: Props) {
                   className={`preset-menu-item${movingItem.projectId === p.id ? ' current' : ''}`}
                   onClick={() => moveTo(movingItem, p.id)}
                 >
-                  <span className="pname">📁 {p.name}</span>
+                  <span className="pname">
+                    <Icon name="folder" /> {p.name}
+                  </span>
                 </button>
               ))}
             </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import { slugify, type GalleryItem, type Project, type StoredScene } from '../../core/types';
 import { getGalleryAudio, listGallery } from '../gallery/galleryRepo';
@@ -297,7 +298,9 @@ export function TimelineScreen() {
   if (projects.length === 0)
     return (
       <div className="empty-state">
-        <div className="empty-icon">🎞</div>
+        <div className="empty-icon">
+          <Icon name="theaters" />
+        </div>
         <h2>No projects yet</h2>
         <p>The timeline is built from a project’s storyboard. Create a project and build its storyboard first.</p>
       </div>
@@ -314,26 +317,32 @@ export function TimelineScreen() {
             className={`chip${projectId === p.id ? ' active' : ''}`}
             onClick={() => setProjectId(p.id)}
           >
-            📁 {p.name}
+            <Icon name="folder" /> {p.name}
           </button>
         ))}
         <div className="chip-row-spacer" />
         {ready && (
           <>
             <button className="chip" onClick={resync}>
-              🔄 Re-sync
+              <Icon name="sync" /> Re-sync
             </button>
             <button className="chip" onClick={addVideo}>
-              🎬 Add video
+              <Icon name="movie" /> Add video
             </button>
             <button className="chip" onClick={addMusicFile}>
-              🎵 Add music
+              <Icon name="music_note" /> Add music
             </button>
             <button className="chip" onClick={addOverlay}>
-              🖼 Add overlay
+              <Icon name="image" /> Add overlay
             </button>
             <button className="chip" disabled={exporting} onClick={exportVideo}>
-              {exporting ? 'Rendering…' : '⬇ Export mp4'}
+              {exporting ? (
+                'Rendering…'
+              ) : (
+                <>
+                  <Icon name="download" /> Export mp4
+                </>
+              )}
             </button>
           </>
         )}
@@ -343,7 +352,9 @@ export function TimelineScreen() {
         <div className="spinner" />
       ) : scenes.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">🎬</div>
+          <div className="empty-icon">
+            <Icon name="movie" />
+          </div>
           <h2>No storyboard yet</h2>
           <p>Build this project’s storyboard in the Storyboard tab, then come back to see it on the timeline.</p>
         </div>

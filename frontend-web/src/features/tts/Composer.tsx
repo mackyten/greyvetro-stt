@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { generateSpeech } from '../../core/api';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import {
   autoTitle,
@@ -176,7 +177,7 @@ export function Composer({ draft, onGenerated }: Props) {
           <div className="editor-footer">
             <span className="editor-meta mono">{text.length.toLocaleString()} characters</span>
             <button className="chip" onClick={() => setAssistOpen(true)}>
-              ✨ Write with AI
+              <Icon name="auto_awesome" /> Write with AI
             </button>
           </div>
         </div>
@@ -202,7 +203,7 @@ export function Composer({ draft, onGenerated }: Props) {
               style={{ cursor: 'pointer', userSelect: 'none', marginBottom: settingsOpen ? 12 : 0 }}
               onClick={() => setSettingsOpen((o) => !o)}
             >
-              Voice settings {settingsOpen ? '▾' : '▸'}
+              Voice settings <Icon name={settingsOpen ? 'expand_more' : 'chevron_right'} />
             </h3>
             {settingsOpen && (
               <>
@@ -235,7 +236,7 @@ export function Composer({ draft, onGenerated }: Props) {
                       title="Stability 0.25 · Style 0.60"
                       onClick={() => setSettings((s) => ({ ...s, stability: 0.25, style: 0.6 }))}
                     >
-                      ⚡ Energetic
+                      <Icon name="bolt" /> Energetic
                     </button>
                     <button
                       className="chip"
@@ -249,7 +250,7 @@ export function Composer({ draft, onGenerated }: Props) {
                       title="Stability 0.85 · Style 0"
                       onClick={() => setSettings((s) => ({ ...s, stability: 0.85, style: 0 }))}
                     >
-                      🌙 Calm
+                      <Icon name="bedtime" /> Calm
                     </button>
                   </div>
                 </div>
@@ -297,7 +298,7 @@ export function Composer({ draft, onGenerated }: Props) {
                       className="chip"
                       onClick={() => setPresetMenu((m) => (m ? null : loadPresets()))}
                     >
-                      Apply preset ▾
+                      Apply preset <Icon name="expand_more" />
                     </button>
                     {presetMenu && (
                       <div className="preset-menu">
@@ -330,7 +331,7 @@ export function Composer({ draft, onGenerated }: Props) {
 
           {take && !reviewOpen && (
             <button className="chip review-pill" onClick={() => setReviewOpen(true)}>
-              ▶ Review take · unsaved
+              <Icon name="play_arrow" /> Review take · unsaved
             </button>
           )}
         </div>

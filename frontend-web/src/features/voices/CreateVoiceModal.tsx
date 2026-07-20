@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { cloneVoice, getUsage } from '../../core/api';
+import { Icon } from '../../core/Icon';
 import type { Voice } from '../../core/types';
 
 interface Sample {
@@ -82,7 +83,7 @@ export function CreateVoiceModal({ onCreated, onClose }: Props) {
         <div className="modal-header">
           <h2>Create my voice</h2>
           <button className="icon-btn" title="Close" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">
@@ -109,15 +110,15 @@ export function CreateVoiceModal({ onCreated, onClose }: Props) {
           <div className="preset-actions">
             {!recording ? (
               <button className="chip" onClick={startRecording}>
-                ● Record a sample
+                <Icon name="fiber_manual_record" /> Record a sample
               </button>
             ) : (
               <button className="chip danger" onClick={stopRecording}>
-                ■ Stop recording
+                <Icon name="stop" /> Stop recording
               </button>
             )}
             <button className="chip" onClick={() => fileInputRef.current?.click()}>
-              ⬆ Upload audio
+              <Icon name="upload" /> Upload audio
             </button>
             <input
               ref={fileInputRef}
@@ -137,14 +138,14 @@ export function CreateVoiceModal({ onCreated, onClose }: Props) {
               {samples.map((s, i) => (
                 <div key={i} className="sample-row">
                   <span className="mono">
-                    {s.source === 'recording' ? '🎙' : '📄'} {s.file.name}
+                    <Icon name={s.source === 'recording' ? 'mic' : 'description'} /> {s.file.name}
                   </span>
                   <button
                     className="icon-btn"
                     title="Remove"
                     onClick={() => setSamples((list) => list.filter((_, j) => j !== i))}
                   >
-                    ✕
+                    <Icon name="close" />
                   </button>
                 </div>
               ))}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from '../../core/Icon';
 import type { StoredScene } from '../../core/types';
 import { getGalleryAudio } from '../gallery/galleryRepo';
 
@@ -50,7 +51,7 @@ export function StoryboardPreview({ scenes, imageUrls, clipId, title, onClose }:
         <div className="modal-header">
           <h2>Preview — {title}</h2>
           <button className="icon-btn" title="Close" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">
@@ -59,7 +60,9 @@ export function StoryboardPreview({ scenes, imageUrls, clipId, title, onClose }:
               <img src={imageUrls[active.id]} alt={`Scene ${activeIndex + 1}`} />
             ) : (
               <div className="preview-placeholder">
-                <span>🎬</span>
+                <span>
+                  <Icon name="movie" />
+                </span>
                 <span>
                   Scene {activeIndex + 1}
                   {active && !active.hasImage ? ' — no image yet' : ''}

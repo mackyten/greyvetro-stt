@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import { settingsSummary, type Preset } from '../../core/types';
 import { PresetEditorModal } from './PresetEditorModal';
@@ -18,7 +19,9 @@ export function PresetsScreen({ onUse }: Props) {
   if (items.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-icon">🎚</div>
+        <div className="empty-icon">
+          <Icon name="tune" />
+        </div>
         <h2>No presets yet</h2>
         <p>Save a voice + settings bundle from the Studio's voice-settings card, or from any gallery clip.</p>
       </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import { DEFAULT_MODEL_ID, MODELS, type Preset, type Voice, type VoiceSettings } from '../../core/types';
 import { VoicePickerModal } from '../voices/VoicePickerModal';
@@ -77,7 +78,7 @@ export function PresetEditorModal({ preset, onSaved, onClose }: Props) {
           <div className="modal-header">
             <h2>Edit preset</h2>
             <button className="icon-btn" title="Close" onClick={onClose}>
-              ✕
+              <Icon name="close" />
             </button>
           </div>
           <div className="modal-body">

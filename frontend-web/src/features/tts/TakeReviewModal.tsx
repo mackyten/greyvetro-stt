@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Icon } from '../../core/Icon';
 import { autoTitle, slugify } from '../../core/types';
 import { AudioPlayer } from './AudioPlayer';
 
@@ -43,7 +44,7 @@ export function TakeReviewModal({
         <div className="modal-header">
           <h2>Review take</h2>
           <button className="icon-btn" title="Close (keeps the take)" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">
@@ -53,10 +54,10 @@ export function TakeReviewModal({
           <AudioPlayer src={url} downloadName={`${slugify(autoTitle(text))}.mp3`} />
           <div className="preset-actions">
             <button className="chip active" disabled={generating} onClick={onSave}>
-              💾 Save to {projectName}
+              <Icon name="save" /> Save to {projectName}
             </button>
             <button className="chip" disabled={generating} onClick={onRegenerate}>
-              ↻ {generating ? 'Generating…' : 'Regenerate'}
+              <Icon name="refresh" /> {generating ? 'Generating…' : 'Regenerate'}
             </button>
             <button className="chip danger" disabled={generating} onClick={onDiscard}>
               Discard

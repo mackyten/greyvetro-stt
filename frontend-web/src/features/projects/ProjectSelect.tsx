@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import type { Project } from '../../core/types';
 import { ProjectNameModal } from './ProjectNameModal';
@@ -62,7 +63,7 @@ export function ProjectSelect({ onChange }: Props) {
       <span className="project-label">Project</span>
       <div className="preset-menu-anchor">
         <button className="chip" onClick={openMenu}>
-          📁 {activeName} ▾
+          <Icon name="folder" /> {activeName} <Icon name="expand_more" />
         </button>
         {menuOpen && (
           <div className="preset-menu left">
@@ -81,7 +82,9 @@ export function ProjectSelect({ onChange }: Props) {
                 setCreateOpen(true);
               }}
             >
-              <span className="pname">＋ New project</span>
+              <span className="pname">
+                <Icon name="add" /> New project
+              </span>
             </button>
           </div>
         )}

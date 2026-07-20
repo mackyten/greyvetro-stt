@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getUsage } from './core/api';
+import { Icon } from './core/Icon';
 import type { Draft, GalleryItem, Preset, Usage } from './core/types';
 import { useTheme } from './core/useTheme';
 import { GalleryScreen } from './features/gallery/GalleryScreen';
@@ -12,11 +13,11 @@ import { UsageCard } from './features/usage/UsageCard';
 type Tab = 'studio' | 'gallery' | 'storyboard' | 'timeline' | 'presets';
 
 const TABS: { id: Tab; icon: string; label: string }[] = [
-  { id: 'studio', icon: '🎙', label: 'Studio' },
-  { id: 'gallery', icon: '🎧', label: 'Gallery' },
-  { id: 'storyboard', icon: '🎬', label: 'Storyboard' },
-  { id: 'timeline', icon: '🎞', label: 'Timeline' },
-  { id: 'presets', icon: '🎚', label: 'Presets' },
+  { id: 'studio', icon: 'mic', label: 'Studio' },
+  { id: 'gallery', icon: 'headphones', label: 'Gallery' },
+  { id: 'storyboard', icon: 'movie', label: 'Storyboard' },
+  { id: 'timeline', icon: 'theaters', label: 'Timeline' },
+  { id: 'presets', icon: 'tune', label: 'Presets' },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
@@ -78,13 +79,21 @@ export default function App() {
             className={`nav-item${tab === t.id ? ' active' : ''}`}
             onClick={() => setTab(t.id)}
           >
-            {t.icon} {t.label}
+            <Icon name={t.icon} /> {t.label}
           </button>
         ))}
         <div className="sidebar-footer">
           <UsageCard usage={usage} />
           <button className="theme-toggle" onClick={toggle}>
-            {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
+            {theme === 'dark' ? (
+              <>
+                <Icon name="light_mode" /> Light mode
+              </>
+            ) : (
+              <>
+                <Icon name="dark_mode" /> Dark mode
+              </>
+            )}
           </button>
         </div>
       </aside>

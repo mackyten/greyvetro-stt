@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from '../../core/Icon';
 
 function fmt(seconds: number): string {
   if (!isFinite(seconds)) return '0:00';
@@ -70,7 +71,7 @@ export function AudioPlayer({ src, downloadName, autoPlay = true, showDownload =
     <div className="player">
       <div className="player-controls">
         <button className="play-btn" onClick={togglePlay} title={playing ? 'Pause' : 'Play'}>
-          {playing ? '❚❚' : '▶'}
+          <Icon name={playing ? 'pause' : 'play_arrow'} />
         </button>
         <div className="scrubber" onClick={seek}>
           <div className="track">
@@ -83,7 +84,7 @@ export function AudioPlayer({ src, downloadName, autoPlay = true, showDownload =
       </div>
       {showDownload && (
         <a className="download-btn" href={src} download={downloadName}>
-          ⬇ Download MP3
+          <Icon name="download" /> Download MP3
         </a>
       )}
     </div>

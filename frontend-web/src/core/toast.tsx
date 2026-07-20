@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
+import { Icon } from './Icon';
 
 type Variant = 'success' | 'error' | 'info';
 
@@ -38,7 +39,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.variant}${t.leaving ? ' leaving' : ''}`} role="status">
             <span className="toast-icon">
-              {t.variant === 'success' ? '✓' : t.variant === 'error' ? '✕' : 'ℹ'}
+              <Icon name={t.variant === 'success' ? 'check' : t.variant === 'error' ? 'close' : 'info'} />
             </span>
             {t.message}
           </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { generateScenes, renderVideo, transcribeAudio } from '../../core/api';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import { slugify, type GalleryItem, type Project, type StoredScene } from '../../core/types';
 import { getGalleryAudio, listGallery, updateGalleryItem } from '../gallery/galleryRepo';
@@ -219,7 +220,9 @@ export function StoryboardScreen() {
   if (projects.length === 0)
     return (
       <div className="empty-state">
-        <div className="empty-icon">🎬</div>
+        <div className="empty-icon">
+          <Icon name="movie" />
+        </div>
         <h2>No projects yet</h2>
         <p>A storyboard turns one project into one video. Create a project in the Gallery and save a voiceover take into it first.</p>
       </div>
@@ -234,20 +237,32 @@ export function StoryboardScreen() {
             className={`chip${projectId === p.id ? ' active' : ''}`}
             onClick={() => setProjectId(p.id)}
           >
-            📁 {p.name}
+            <Icon name="folder" /> {p.name}
           </button>
         ))}
         <div className="chip-row-spacer" />
         {scenes && scenes.length > 0 && (
           <>
             <button className="chip" disabled={busy} onClick={generate}>
-              {busy ? 'Working…' : '↻ Regenerate'}
+              {busy ? (
+                'Working…'
+              ) : (
+                <>
+                  <Icon name="refresh" /> Regenerate
+                </>
+              )}
             </button>
             <button className="chip" onClick={() => setPreviewOpen(true)}>
-              ▶ Preview
+              <Icon name="play_arrow" /> Preview
             </button>
             <button className="chip" disabled={exporting} onClick={exportVideo}>
-              {exporting ? 'Rendering…' : '⬇ Export mp4'}
+              {exporting ? (
+                'Rendering…'
+              ) : (
+                <>
+                  <Icon name="download" /> Export mp4
+                </>
+              )}
             </button>
           </>
         )}
@@ -258,7 +273,9 @@ export function StoryboardScreen() {
       ) : scenes.length === 0 ? (
         projectClips.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">🎧</div>
+            <div className="empty-icon">
+              <Icon name="headphones" />
+            </div>
             <h2>No clips in this project</h2>
             <p>Save a voiceover take into this project from the Studio, then come back to build its storyboard.</p>
           </div>
@@ -280,7 +297,13 @@ export function StoryboardScreen() {
               </select>
             </label>
             <button className="generate-btn" disabled={busy || !voiceClipId} onClick={generate}>
-              {busy ? 'Transcribing & generating…' : '🎬 Generate storyboard'}
+              {busy ? (
+                'Transcribing & generating…'
+              ) : (
+                <>
+                  <Icon name="movie" /> Generate storyboard
+                </>
+              )}
             </button>
           </div>
         )
@@ -309,7 +332,9 @@ export function StoryboardScreen() {
                 {imageUrls[scene.id] ? (
                   <img src={imageUrls[scene.id]} alt={`Scene ${i + 1}`} />
                 ) : (
-                  <span>＋ image</span>
+                  <span>
+                    <Icon name="add_a_photo" /> image
+                  </span>
                 )}
               </button>
               <div className="sb-body">
@@ -321,15 +346,15 @@ export function StoryboardScreen() {
               </div>
               <div className="sb-actions">
                 <button className="icon-btn" title="Copy image prompt" onClick={() => copyPrompt(scene, i)}>
-                  ⧉
+                  <Icon name="content_copy" />
                 </button>
                 {scene.hasImage && (
                   <button className="icon-btn" title="Remove image" onClick={() => removeImage(scene.id)}>
-                    🖼✕
+                    <Icon name="hide_image" />
                   </button>
                 )}
                 <button className="icon-btn" title="Delete scene" onClick={() => removeScene(scene, i)}>
-                  🗑
+                  <Icon name="delete" />
                 </button>
               </div>
             </div>

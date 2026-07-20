@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { generateScenes } from '../../core/api';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import type { Scene, Transcript } from '../../core/types';
 
@@ -58,7 +59,7 @@ export function TranscriptModal({ title, transcript, onClose }: Props) {
         <div className="modal-header">
           <h2>Transcript — {title}</h2>
           <button className="icon-btn" title="Close" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body transcript-body">
@@ -95,7 +96,7 @@ export function TranscriptModal({ title, transcript, onClose }: Props) {
                       title="Copy image prompt (paste into Flow)"
                       onClick={() => copy(s.imagePrompt, `Scene ${i + 1} prompt copied.`)}
                     >
-                      ⧉ Copy prompt
+                      <Icon name="content_copy" /> Copy prompt
                     </button>
                   </div>
                   <p className="scene-narration">“{s.narration}”</p>
@@ -114,7 +115,7 @@ export function TranscriptModal({ title, transcript, onClose }: Props) {
           {view === 'text' && (
             <>
               <button className="chip" onClick={() => copy(transcript.text, 'Transcript copied.')}>
-                ⧉ Copy text
+                <Icon name="content_copy" /> Copy text
               </button>
               <button className="chip" onClick={() => setView('timings')}>
                 Show word timings
@@ -122,7 +123,13 @@ export function TranscriptModal({ title, transcript, onClose }: Props) {
             </>
           )}
           <button className="chip" disabled={generating} onClick={showScenes}>
-            {generating ? 'Generating scenes…' : '🎬 Scene prompts'}
+            {generating ? (
+              'Generating scenes…'
+            ) : (
+              <>
+                <Icon name="movie" /> Scene prompts
+              </>
+            )}
           </button>
         </div>
       </div>

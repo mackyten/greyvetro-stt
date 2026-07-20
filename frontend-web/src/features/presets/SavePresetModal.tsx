@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import type { VoiceSettings } from '../../core/types';
 import { addPreset, findMatchingPreset } from './presetRepo';
@@ -36,7 +37,7 @@ export function SavePresetModal({ voiceId, voiceName, settings, onSaved, onClose
         <div className="modal-header">
           <h2>Save as preset</h2>
           <button className="icon-btn" title="Close" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">

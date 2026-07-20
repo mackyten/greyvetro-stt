@@ -12,6 +12,30 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: 'Material Icons';
+  src: url('/fonts/MaterialIcons.woff2') format('woff2');
+  font-weight: 400;
+  font-display: block;
+}
+
+/* App-wide icon glyphs (replaces the old emoji-as-text icons). Usage: <span className="material-icons">download</span> — the child text is a Material Icons ligature name, not a label. */
+.material-icons {
+  font-family: 'Material Icons';
+  font-weight: normal;
+  font-style: normal;
+  font-size: inherit;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  vertical-align: middle;
+  -webkit-font-smoothing: antialiased;
+}
+
 :root {
   --bg: #eef1f5;
   --surface: #ffffff;
@@ -1308,19 +1332,66 @@ input[type='range'] {
   overflow-x: auto;
 }
 
-/* Header: live frame preview + edit tools. */
-.tl-head {
+/* Top bar: global editor actions (undo/redo, zoom) above everything else. */
+.tl-topbar {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.tl-topbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+/* Main row: center preview stage + right-side context inspector. Stacks on narrow viewports. */
+.tl-main {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
   flex-wrap: wrap;
-  align-items: stretch;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.tl-stage {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.tl-stage-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tl-inspector {
+  flex: 0 0 280px;
+  min-width: 240px;
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+}
+@media (max-width: 880px) {
+  .tl-inspector {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: 0;
+    padding-top: 16px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
 }
 
 .tl-preview {
   position: relative;
   flex: 0 0 auto;
-  width: 116px;
+  width: 230px;
   aspect-ratio: 9 / 16;
   border-radius: 10px;
   overflow: hidden;
@@ -1362,16 +1433,14 @@ input[type='range'] {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
-.tl-tools {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  min-width: 220px;
-}
 .tl-tools-row {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+/* Bottom-panel header row (Split/Delete) sits just above the track lanes. */
+.tl-tracks-header {
+  margin-bottom: 10px;
 }
 .tl-tools-meta {
   font-size: 12px;
@@ -1405,6 +1474,12 @@ input[type='range'] {
 }
 .tl-tick:first-child {
   transform: none;
+}
+
+/* Tracks panel: the header row (Split/Delete) + track lanes, docked below the stage/inspector. */
+.tl-tracks-panel {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 /* Body: a fixed label column + an independently horizontally-scrolling ruler/lanes column (the

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Icon } from '../../core/Icon';
 import { VOICEOVER_ASSET_ID } from './model/seed';
 import {
   cropFromZoomPan,
@@ -456,87 +457,83 @@ export function TimelineEditor({
   return (
     <div className="tl card" onPointerMove={onTrimPointerMove} onPointerUp={onTrimPointerUp}>
       <audio ref={audioElRef} src={audioUrl ?? undefined} preload="auto" />
-      <div className="tl-head">
-        <div className="tl-preview" aria-hidden>
-          {previewClip && previewIsVideo && previewVideoUrl ? (
-            <VideoFrame clip={previewClip} src={previewVideoUrl} ph={ph} playing={playing} style={cropStyle} />
-          ) : previewClip && imageUrls[previewClip.sourceId] ? (
-            <img src={imageUrls[previewClip.sourceId]} alt="" style={cropStyle} />
-          ) : (
-            <div className="tl-preview-empty">🎬</div>
-          )}
-          {activeOverlays.map((c) => {
-            const overlayIsVideo = timeline.assets.find((a) => a.id === c.sourceId)?.type === 'video';
-            const overlaySrc = overlayIsVideo ? videoUrls[c.sourceId] : imageUrls[c.sourceId];
-            if (!overlaySrc) return null;
-            const overlayStyle = {
-              left: `${(c.position?.x ?? 0) * 100}%`,
-              top: `${(c.position?.y ?? 0) * 100}%`,
-              width: `${(c.scale ?? 0.3) * 100}%`,
-            };
-            return overlayIsVideo ? (
-              <VideoFrame
-                key={c.id}
-                clip={c}
-                src={overlaySrc}
-                ph={ph}
-                playing={playing}
-                className="tl-preview-overlay"
-                style={overlayStyle}
-              />
+
+      <div className="tl-topbar">
+        <div className="tl-tools-row">
+          <button className="chip" disabled={!canUndo} onClick={() => { stop(); onUndo(); }}>
+            <Icon name="undo" /> Undo
+          </button>
+          <button className="chip" disabled={!canRedo} onClick={() => { stop(); onRedo(); }}>
+            <Icon name="redo" /> Redo
+          </button>
+        </div>
+        <div className="tl-topbar-sep" />
+        <div className="tl-tools-row">
+          <button className="chip" onClick={() => zoomBy(1 / 1.4)}>
+            <Icon name="zoom_out" />
+          </button>
+          <span className="mono tl-zoom-label">{Math.round(pxPerSecond)}px/s</span>
+          <button className="chip" onClick={() => zoomBy(1.4)}>
+            <Icon name="zoom_in" />
+          </button>
+          <button className="chip" onClick={zoomToFit}>
+            Fit
+          </button>
+        </div>
+      </div>
+
+      <div className="tl-main">
+        <div className="tl-stage">
+          <div className="tl-preview" aria-hidden>
+            {previewClip && previewIsVideo && previewVideoUrl ? (
+              <VideoFrame clip={previewClip} src={previewVideoUrl} ph={ph} playing={playing} style={cropStyle} />
+            ) : previewClip && imageUrls[previewClip.sourceId] ? (
+              <img src={imageUrls[previewClip.sourceId]} alt="" style={cropStyle} />
             ) : (
-              <img key={c.id} className="tl-preview-overlay" src={overlaySrc} alt="" style={overlayStyle} />
-            );
-          })}
-          {activeCaption && <div className="tl-preview-caption">{activeCaption}</div>}
+              <div className="tl-preview-empty">
+                <Icon name="movie" />
+              </div>
+            )}
+            {activeOverlays.map((c) => {
+              const overlayIsVideo = timeline.assets.find((a) => a.id === c.sourceId)?.type === 'video';
+              const overlaySrc = overlayIsVideo ? videoUrls[c.sourceId] : imageUrls[c.sourceId];
+              if (!overlaySrc) return null;
+              const overlayStyle = {
+                left: `${(c.position?.x ?? 0) * 100}%`,
+                top: `${(c.position?.y ?? 0) * 100}%`,
+                width: `${(c.scale ?? 0.3) * 100}%`,
+              };
+              return overlayIsVideo ? (
+                <VideoFrame
+                  key={c.id}
+                  clip={c}
+                  src={overlaySrc}
+                  ph={ph}
+                  playing={playing}
+                  className="tl-preview-overlay"
+                  style={overlayStyle}
+                />
+              ) : (
+                <img key={c.id} className="tl-preview-overlay" src={overlaySrc} alt="" style={overlayStyle} />
+              );
+            })}
+            {activeCaption && <div className="tl-preview-caption">{activeCaption}</div>}
+          </div>
+
+          <div className="tl-stage-controls">
+            <button className="chip" onClick={togglePlay}>
+              <Icon name={playing ? 'pause' : 'play_arrow'} /> {playing ? 'Pause' : 'Play'}
+            </button>
+            <div className="tl-tools-meta mono">
+              {ph.toFixed(1)}s / {total.toFixed(1)}s
+              {selectedClip && (selectedIsVisual || selMusic || selOverlay) && (
+                <> · selected {selectedClip.duration.toFixed(1)}s</>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="tl-tools">
-          <div className="tl-tools-row">
-            <button className="chip" onClick={togglePlay}>
-              {playing ? '⏸ Pause' : '▶ Play'}
-            </button>
-            <button
-              className="chip"
-              disabled={!canSplit}
-              onClick={() => {
-                if (selected) {
-                  stop();
-                  onChange(splitClip(timeline, selected, localPlayhead));
-                }
-              }}
-            >
-              ✂ Split
-            </button>
-            <button className="chip" disabled={!canDelete} onClick={onDelete}>
-              {selMusic ? '🗑 Remove music' : selOverlay ? '🗑 Remove overlay' : '🗑 Delete'}
-            </button>
-            <button className="chip" disabled={!canUndo} onClick={() => { stop(); onUndo(); }}>
-              ↩ Undo
-            </button>
-            <button className="chip" disabled={!canRedo} onClick={() => { stop(); onRedo(); }}>
-              ↪ Redo
-            </button>
-          </div>
-          <div className="tl-tools-row">
-            <button className="chip" onClick={() => zoomBy(1 / 1.4)}>
-              🔍−
-            </button>
-            <span className="mono tl-zoom-label">{Math.round(pxPerSecond)}px/s</span>
-            <button className="chip" onClick={() => zoomBy(1.4)}>
-              🔍+
-            </button>
-            <button className="chip" onClick={zoomToFit}>
-              Fit
-            </button>
-          </div>
-          <div className="tl-tools-meta mono">
-            Playhead {ph.toFixed(1)}s / {total.toFixed(1)}s
-            {selectedClip && (selectedIsVisual || selMusic || selOverlay) && (
-              <> · selected {selectedClip.duration.toFixed(1)}s</>
-            )}
-          </div>
-
+        <div className="tl-inspector">
           {selMusic ? (
             <div className="tl-audio-inspector">
               <label>
@@ -740,7 +737,7 @@ export function TimelineEditor({
                 Reset framing
               </button>
               <button className="chip" onClick={() => onChange(setMotion(timeline, selectedClip.id, DEFAULT_MOTION))}>
-                🎥 Add motion
+                <Icon name="videocam" /> Add motion
               </button>
               {isFirstBaseClip(timeline, selectedClip.id) && (
                 <label>
@@ -935,12 +932,37 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <div className="tl-body">
+      <div className="tl-tracks-panel">
+        <div className="tl-tools-row tl-tracks-header">
+          <button
+            className="chip"
+            disabled={!canSplit}
+            onClick={() => {
+              if (selected) {
+                stop();
+                onChange(splitClip(timeline, selected, localPlayhead));
+              }
+            }}
+          >
+            <Icon name="content_cut" /> Split
+          </button>
+          <button className="chip" disabled={!canDelete} onClick={onDelete}>
+            <Icon name="delete" /> {selMusic ? 'Remove music' : selOverlay ? 'Remove overlay' : 'Delete'}
+          </button>
+        </div>
+
+        <div className="tl-body">
         <div className="tl-labels">
           <div className="tl-ruler-spacer" />
           {tracks.map((track) => (
             <div key={track.id} className="tl-lane-label">
-              {overlay(track.id) ? '🖼 Overlay' : LANE_LABEL[track.type]}
+              {overlay(track.id) ? (
+                <>
+                  <Icon name="image" /> Overlay
+                </>
+              ) : (
+                LANE_LABEL[track.type]
+              )}
             </div>
           ))}
         </div>
@@ -1043,7 +1065,7 @@ export function TimelineEditor({
                           selectTransition(clip.id);
                         }}
                       >
-                        ⤭
+                        <Icon name="swap_horiz" />
                       </button>
                     );
                   })}
@@ -1051,6 +1073,7 @@ export function TimelineEditor({
             );
           })}
         </div>
+      </div>
       </div>
     </div>
   );
@@ -1140,16 +1163,25 @@ function ClipBar({
   const left = (clip.startTime / total) * 100;
   const width = (duration / total) * 100;
   const label = overlay
-    ? '🖼 Overlay'
+    ? 'Overlay'
     : track.type === 'caption'
       ? clip.text ?? ''
       : track.type === 'audio'
         ? music
-          ? '🎵 Music'
+          ? 'Music'
           : 'Voiceover'
         : track.type === 'video'
-          ? `🎬 Video ${index + 1}`
+          ? `Video ${index + 1}`
           : `Scene ${index + 1}`;
+  const labelIcon = overlay
+    ? 'image'
+    : track.type === 'audio'
+      ? music
+        ? 'music_note'
+        : null
+      : track.type === 'video'
+        ? 'movie'
+        : null;
 
   return (
     <div
@@ -1173,7 +1205,9 @@ function ClipBar({
       }}
     >
       {(base || overlay) && thumb && <img src={thumb} alt="" />}
-      <span className="tl-clip-label">{label}</span>
+      <span className="tl-clip-label">
+        {labelIcon && <Icon name={labelIcon} />} {label}
+      </span>
       {/* Stills/video trim at both edges; music/overlay only at the end (anchored at t=0). */}
       {base && selected && (
         <span className="tl-trim tl-trim-start" onPointerDown={(e) => onTrimStart('start', e)} />

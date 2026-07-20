@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { generateScript } from '../../core/api';
+import { Icon } from '../../core/Icon';
 
 const LENGTHS = [30, 60, 90, 120];
 
@@ -37,7 +38,7 @@ export function ScriptAssistModal({ onResult, onClose }: Props) {
         <div className="modal-header">
           <h2>Write script with AI</h2>
           <button className="icon-btn" title="Close" onClick={onClose}>
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">
@@ -82,7 +83,13 @@ export function ScriptAssistModal({ onResult, onClose }: Props) {
             disabled={!topic.trim() || generating}
             onClick={generate}
           >
-            {generating ? 'Writing…' : '✨ Write script'}
+            {generating ? (
+              'Writing…'
+            ) : (
+              <>
+                <Icon name="auto_awesome" /> Write script
+              </>
+            )}
           </button>
         </div>
       </div>
