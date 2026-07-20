@@ -28,7 +28,17 @@ export function TimelineScreen() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [clips, setClips] = useState<GalleryItem[]>([]);
   const [scenes, setScenes] = useState<StoredScene[] | null>(null);
-  const { timeline, load: loadTimeline, set: setTimeline, undo, redo, canUndo, canRedo } = useTimelineHistory();
+  const {
+    timeline,
+    load: loadTimeline,
+    set: setTimeline,
+    setLive: setLiveTimeline,
+    commitLive: commitLiveTimeline,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useTimelineHistory();
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -220,10 +230,19 @@ export function TimelineScreen() {
     }
   };
 
-  // Persist every edit — the timeline is the source of truth (see the load effect above).
+  // Persist every discrete edit — the timeline is the source of truth (see the load effect above).
   const commit = (next: Timeline) => {
     setTimeline(next);
     void saveTimeline(next);
+  };
+
+  // One tick of a continuous slider drag: update the visible/preview state only, no persistence and
+  // no history entry yet (see useTimelineHistory's setLive) — commitDragEnd (pointerup) does both,
+  // once, for the whole gesture.
+  const commitLiveEdit = (next: Timeline) => setLiveTimeline(next);
+  const commitDragEnd = () => {
+    commitLiveTimeline();
+    if (timeline) void saveTimeline(timeline);
   };
 
   const resync = async () => {
@@ -343,6 +362,8 @@ export function TimelineScreen() {
             videoUrls={videoUrls}
             audioUrl={audioUrl}
             onChange={commit}
+            onChangeLive={commitLiveEdit}
+            onCommitDrag={commitDragEnd}
             canUndo={canUndo}
             canRedo={canRedo}
             onUndo={undo}

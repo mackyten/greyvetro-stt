@@ -188,6 +188,8 @@ export function splitClip(timeline: Timeline, clipId: string, localOffset: numbe
     duration: localOffset,
     inPoint: isVideo ? clip.inPoint : 0,
     outPoint: isVideo ? cut : localOffset,
+    // No longer the last base clip if it was — that's now the second half.
+    fadeOutToBlack: undefined,
   };
   const second: Clip = {
     ...clip,
@@ -198,6 +200,8 @@ export function splitClip(timeline: Timeline, clipId: string, localOffset: numbe
     // The second half's predecessor is now the first half (a plain cut) — a transition into the
     // original clip belongs on the first half only, not duplicated onto the new interior boundary.
     transitionIn: undefined,
+    // No longer the first base clip if it was — that's now the first half.
+    fadeInFromBlack: undefined,
   };
 
   const clips = [...track.clips];
@@ -432,6 +436,46 @@ export function setClipTransition(
       track.id,
       track.clips.map((c) => (c.id === clipId ? { ...c, transitionIn: next } : c)),
     ),
+  );
+}
+
+/** True when `clipId` is the very first clip on the base visual track — no predecessor, where a
+ * fade-in-from-black is meaningful (as opposed to a crossfade from a previous clip). */
+export function isFirstBaseClip(timeline: Timeline, clipId: string): boolean {
+  const ordered = baseVisualClipsOrdered(timeline);
+  return ordered.length > 0 && ordered[0].id === clipId;
+}
+
+/** True when `clipId` is the very last clip on the base visual track — no successor, where a
+ * fade-out-to-black is meaningful. */
+export function isLastBaseClip(timeline: Timeline, clipId: string): boolean {
+  const ordered = baseVisualClipsOrdered(timeline);
+  return ordered.length > 0 && ordered[ordered.length - 1].id === clipId;
+}
+
+/** Set (or clear, with 0/undefined) a base-track clip's fade from/to pure black at its own edge.
+ * The backend only honors fadeInFromBlack on the actual first clip / fadeOutToBlack on the actual
+ * last clip regardless of what's stored here, so this doesn't need to police clip position itself
+ * — same self-restricting relationship setClipTransition has with the backend's i>0 check. Pure. */
+export function setFadeToBlack(
+  timeline: Timeline,
+  clipId: string,
+  patch: { fadeInFromBlack?: number; fadeOutToBlack?: number },
+): Timeline {
+  const track = trackOf(timeline, clipId);
+  if (!track || !isBaseVisual(timeline, track)) return timeline;
+  return withTrackClips(
+    timeline,
+    track.id,
+    track.clips.map((c) => {
+      if (c.id !== clipId) return c;
+      const next = { ...c };
+      if (patch.fadeInFromBlack !== undefined)
+        next.fadeInFromBlack = patch.fadeInFromBlack > 0 ? patch.fadeInFromBlack : undefined;
+      if (patch.fadeOutToBlack !== undefined)
+        next.fadeOutToBlack = patch.fadeOutToBlack > 0 ? patch.fadeOutToBlack : undefined;
+      return next;
+    }),
   );
 }
 

@@ -15,7 +15,11 @@ namespace Greyvetro.Infrastructure.Ffmpeg;
 /// optionally reframed (<see cref="Clip.Crop"/>), rotated (<see cref="Clip.Rotation"/>), or animated
 /// (<see cref="Clip.Motion"/>, Ken Burns via <c>zoompan</c>). Higher-zIndex visual tracks composite as
 /// PiP/logo-style <c>overlay</c> layers (<see cref="Clip.Position"/>/<see cref="Clip.Scale"/>), under
-/// the caption alpha-PNG layer. Audio supports multi-track mixing (per-clip/-track volume, fades).
+/// the caption alpha-PNG layer. Audio supports multi-track mixing (per-clip/-track volume, fades);
+/// a base-track video clip's own included audio (<see cref="Clip.IncludeAudio"/>) auto-crossfades
+/// to match any adjacent <see cref="Clip.TransitionIn"/>. The base track's very first/last clip can
+/// also fade from/to pure black (<see cref="Clip.FadeInFromBlack"/>/<see
+/// cref="Clip.FadeOutToBlack"/>) independent of any transition.
 /// </summary>
 public class FilterGraphCompiler
 {
@@ -104,6 +108,11 @@ public class FilterGraphCompiler
                 ? ZoompanChain(clip.Motion!, clip.Duration, w, h, fps)
                 : $"{CropPrefix(clip.Crop)}scale={w}:{h}:force_original_aspect_ratio=increase," +
                   $"crop={w}:{h}{RotateSuffix(clip.Rotation, w, h)},setsar=1,fps={fps}";
+            // Fade-from/to-black only honored at the base track's natural start/end (index 0 / last)
+            // regardless of what's stored on other clips — self-restricting like TransitionIn's i>0.
+            var fadeInBlack = i == 0 ? clip.FadeInFromBlack : null;
+            var fadeOutBlack = i == visualClips.Count - 1 ? clip.FadeOutToBlack : null;
+            chain += FadeToBlackSuffix(fadeInBlack, fadeOutBlack, clip.Duration);
             filters.Append($"[{i}:v]{chain}").AppendLine($"[v{i}];");
         }
 
@@ -169,7 +178,18 @@ public class FilterGraphCompiler
             }
             foreach (var (clip, inputIndex) in videoAudioParts)
             {
-                audio.Append($";[{inputIndex}:a]{BuildAudioChain(clip, trackVolume: null)}[a{label}]");
+                // Auto-crossfade a video clip's own audio to match any visual transition at its
+                // edges: an incoming transition on THIS clip fades its audio in over that overlap;
+                // an incoming transition on the NEXT clip (i.e. this clip's outgoing transition)
+                // fades it out. Whichever is larger of this and the clip's own manual FadeIn/FadeOut
+                // wins (BuildAudioChain takes the max), so a manual fade never gets shortened.
+                var transitionIn = inputIndex > 0
+                    ? ValidTransition(clip.TransitionIn, visualClips[inputIndex - 1].Duration, clip.Duration)
+                    : null;
+                var transitionOut = inputIndex + 1 < visualClips.Count
+                    ? ValidTransition(visualClips[inputIndex + 1].TransitionIn, clip.Duration, visualClips[inputIndex + 1].Duration)
+                    : null;
+                audio.Append($";[{inputIndex}:a]{BuildAudioChain(clip, trackVolume: null, transitionIn?.Duration ?? 0, transitionOut?.Duration ?? 0)}[a{label}]");
                 label++;
             }
 
@@ -383,23 +403,54 @@ public class FilterGraphCompiler
     /// The <c>volume,afade,adelay</c> chain for one audio mix member — a dedicated audio-track clip
     /// (<paramref name="trackVolume"/> from its track) or a base-track video clip's own embedded
     /// audio (<paramref name="trackVolume"/> null, since there's no track-level gain to fold in).
+    /// <paramref name="autoFadeIn"/>/<paramref name="autoFadeOut"/> are a video clip's transition-
+    /// derived crossfade floor (0 for a dedicated audio-track clip, which has no transitions) — the
+    /// larger of these and the clip's own manual <see cref="Clip.FadeIn"/>/<see
+    /// cref="Clip.FadeOut"/> is used, so a manual fade is never shortened by the auto-crossfade.
     /// </summary>
-    private static string BuildAudioChain(Clip clip, double? trackVolume)
+    private static string BuildAudioChain(Clip clip, double? trackVolume, double autoFadeIn = 0, double autoFadeOut = 0)
     {
         var chain = new List<string>();
         var volume = EffectiveVolume(clip.Volume, trackVolume);
         if (volume is not null && Math.Abs(volume.Value - 1.0) > 1e-9)
             chain.Add($"volume={FfmpegProcess.Fmt(volume.Value)}");
-        if (clip.FadeIn is > 0)
-            chain.Add($"afade=t=in:st=0:d={FfmpegProcess.Fmt(clip.FadeIn.Value)}");
-        if (clip.FadeOut is > 0)
-            chain.Add($"afade=t=out:st={FfmpegProcess.Fmt(Math.Max(0, clip.Duration - clip.FadeOut.Value))}:d={FfmpegProcess.Fmt(clip.FadeOut.Value)}");
+        var fadeIn = Math.Max(clip.FadeIn ?? 0, autoFadeIn);
+        var fadeOut = Math.Max(clip.FadeOut ?? 0, autoFadeOut);
+        if (fadeIn > 0)
+            chain.Add($"afade=t=in:st=0:d={FfmpegProcess.Fmt(fadeIn)}");
+        if (fadeOut > 0)
+            chain.Add($"afade=t=out:st={FfmpegProcess.Fmt(Math.Max(0, clip.Duration - fadeOut))}:d={FfmpegProcess.Fmt(fadeOut)}");
         var delayMs = (long)Math.Round(clip.StartTime * 1000);
         if (delayMs > 0)
             chain.Add($"adelay={delayMs}:all=1");
         if (chain.Count == 0)
             chain.Add("anull");
         return string.Join(",", chain);
+    }
+
+    /// <summary>
+    /// A trailing <c>,fade=…</c> suffix that fades a clip's own frame from/to pure black at its own
+    /// edges — as opposed to <c>xfade</c>, which crossfades between two adjacent clips. Meaningful
+    /// on the base track's very first clip (fade in, no predecessor) and very last clip (fade out,
+    /// no successor); the caller (<see cref="Compile"/>) only passes non-null there. Each duration
+    /// is clamped to the clip's own length (the server never trusts the client's value outright, the
+    /// same "can't outlast the clip" rule <see cref="ValidTransition"/> applies to transitions).
+    /// Empty when both are absent/non-positive, keeping the un-faded graph byte-identical.
+    /// </summary>
+    private static string FadeToBlackSuffix(double? fadeIn, double? fadeOut, double duration)
+    {
+        var parts = new List<string>();
+        if (fadeIn is > 0)
+        {
+            var d = Math.Min(fadeIn.Value, duration);
+            parts.Add($"fade=t=in:st=0:d={FfmpegProcess.Fmt(d)}:color=black");
+        }
+        if (fadeOut is > 0)
+        {
+            var d = Math.Min(fadeOut.Value, duration);
+            parts.Add($"fade=t=out:st={FfmpegProcess.Fmt(Math.Max(0, duration - d))}:d={FfmpegProcess.Fmt(d)}:color=black");
+        }
+        return parts.Count == 0 ? string.Empty : "," + string.Join(",", parts);
     }
 
     /// <summary>

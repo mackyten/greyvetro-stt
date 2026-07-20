@@ -136,8 +136,27 @@ public record Clip
     /// amount at each transition, so the compiler clamps <see cref="Transition.Duration"/> against
     /// both adjacent clips' own <see cref="Duration"/> rather than trusting it outright. Ignored on
     /// the first base-track clip (no predecessor to fade from) and on overlay/audio/caption tracks.
+    /// When this clip's own audio is mixed in (<see cref="IncludeAudio"/>), the compiler also
+    /// auto-crossfades that audio (afade out/in) to match — see <see cref="FadeOut"/>/<see
+    /// cref="FadeIn"/>, which take the larger of any manually-set value and the transition overlap.
     /// </summary>
     public Transition? TransitionIn { get; init; }
+
+    /// <summary>
+    /// Optional fade in from pure black at the very start of the base track — only meaningful on
+    /// the first base-track clip (there's no predecessor to crossfade from instead; see <see
+    /// cref="TransitionIn"/> for that case). Seconds; rendered via ffmpeg's plain <c>fade</c>
+    /// filter. The compiler only honors this on the first clip (index 0) regardless of what's
+    /// stored elsewhere, mirroring how <see cref="TransitionIn"/> self-restricts to non-first clips.
+    /// </summary>
+    public double? FadeInFromBlack { get; init; }
+
+    /// <summary>
+    /// Optional fade out to pure black at the very end of the base track — only meaningful on the
+    /// last base-track clip (there's no successor to crossfade into instead). Seconds. The compiler
+    /// only honors this on the last clip regardless of what's stored elsewhere.
+    /// </summary>
+    public double? FadeOutToBlack { get; init; }
 }
 
 public enum TransitionStyle

@@ -4,6 +4,8 @@ import {
   cropFromZoomPan,
   DEFAULT_MOTION,
   deleteClip,
+  isFirstBaseClip,
+  isLastBaseClip,
   isOverlayTrack,
   MAX_ROTATION,
   MAX_ZOOM,
@@ -15,6 +17,7 @@ import {
   setClipFade,
   setClipTransition,
   setCrop,
+  setFadeToBlack,
   setMotion,
   setOverlayTransform,
   setRotation,
@@ -41,6 +44,9 @@ const MIN_PPS = 20;
 const MAX_PPS = 400;
 const DEFAULT_PPS = 70;
 const SNAP_PX = 8;
+
+/** Widest fade-in-from-black / fade-out-to-black the edge-fade sliders allow, in seconds. */
+const MAX_EDGE_FADE = 5;
 
 function fmt(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -87,6 +93,8 @@ export function TimelineEditor({
   videoUrls,
   audioUrl,
   onChange,
+  onChangeLive,
+  onCommitDrag,
   canUndo,
   canRedo,
   onUndo,
@@ -99,6 +107,12 @@ export function TimelineEditor({
   videoUrls: Record<string, string>;
   audioUrl: string | null;
   onChange: (next: Timeline) => void;
+  /** One tick of a continuous slider drag: live preview update only, no history entry (see
+   * useTimelineHistory's setLive) — paired with onCommitDrag on pointerup. */
+  onChangeLive: (next: Timeline) => void;
+  /** Ends a slider drag gesture, coalescing every onChangeLive tick since it started into a single
+   * undo step and persisting the result. */
+  onCommitDrag: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -307,35 +321,52 @@ export function TimelineEditor({
 
   // Reframe inspector state for a selected visual clip (zoom + pan-center <-> the stored crop rect).
   const zoomPan = selectedIsVisual && selectedClip ? zoomPanFromCrop(selectedClip.crop) : null;
-  const applyCrop = (zoom: number, panX: number, panY: number) => {
+  // Discrete edits commit immediately; a continuous slider drag passes live=true to update the
+  // preview only (paired with onCommitDrag on pointerup) — see useTimelineHistory's setLive.
+  const applyEdit = (next: Timeline, live?: boolean) => {
+    if (live) onChangeLive(next);
+    else onChange(next);
+  };
+  const applyCrop = (zoom: number, panX: number, panY: number, live?: boolean) => {
     if (!selectedClip) return;
     // Zoom back to 1 clears the crop (full frame); otherwise store the derived rect.
-    onChange(setCrop(timeline, selectedClip.id, zoom <= 1.001 ? null : cropFromZoomPan(zoom, panX, panY)));
+    applyEdit(setCrop(timeline, selectedClip.id, zoom <= 1.001 ? null : cropFromZoomPan(zoom, panX, panY)), live);
   };
-  const applyRotation = (degrees: number) => {
+  const applyRotation = (degrees: number, live?: boolean) => {
     if (!selectedClip) return;
-    onChange(setRotation(timeline, selectedClip.id, degrees));
+    applyEdit(setRotation(timeline, selectedClip.id, degrees), live);
   };
-  const applyMotion = (patch: { from?: Partial<KenBurns>; to?: Partial<KenBurns> }) => {
+  const applyMotion = (patch: { from?: Partial<KenBurns>; to?: Partial<KenBurns> }, live?: boolean) => {
     if (!selectedClip?.motion) return;
-    onChange(
+    applyEdit(
       setMotion(timeline, selectedClip.id, {
         from: { ...selectedClip.motion.from, ...patch.from },
         to: { ...selectedClip.motion.to, ...patch.to },
       }),
+      live,
     );
   };
-  const applyOverlayTransform = (patch: { position?: { x: number; y: number }; scale?: number }) => {
+  const applyOverlayTransform = (
+    patch: { position?: { x: number; y: number }; scale?: number },
+    live?: boolean,
+  ) => {
     if (!selOverlay) return;
-    onChange(setOverlayTransform(timeline, selOverlay.clip.id, patch));
+    applyEdit(setOverlayTransform(timeline, selOverlay.clip.id, patch), live);
   };
-  const applyVideoAudio = (patch: { includeAudio?: boolean; volume?: number; fadeIn?: number; fadeOut?: number }) => {
+  const applyVideoAudio = (
+    patch: { includeAudio?: boolean; volume?: number; fadeIn?: number; fadeOut?: number },
+    live?: boolean,
+  ) => {
     if (!selectedClip) return;
-    onChange(setVideoAudio(timeline, selectedClip.id, patch));
+    applyEdit(setVideoAudio(timeline, selectedClip.id, patch), live);
   };
-  const applyTransition = (style: TransitionStyle, duration: number) => {
+  const applyTransition = (style: TransitionStyle, duration: number, live?: boolean) => {
     if (!transitionClip) return;
-    onChange(setClipTransition(timeline, transitionClip.id, { style, duration }));
+    applyEdit(setClipTransition(timeline, transitionClip.id, { style, duration }), live);
+  };
+  const applyFadeToBlack = (patch: { fadeInFromBlack?: number; fadeOutToBlack?: number }, live?: boolean) => {
+    if (!selectedClip) return;
+    applyEdit(setFadeToBlack(timeline, selectedClip.id, patch), live);
   };
 
   // Split / delete / undo-redo keyboard shortcuts.
@@ -517,8 +548,9 @@ export function TimelineEditor({
                   step={0.05}
                   value={selMusic.track.volume ?? 1}
                   onChange={(e) =>
-                    onChange(setTrackAudio(timeline, selMusic.track.id, { volume: Number(e.target.value) }))
+                    onChangeLive(setTrackAudio(timeline, selMusic.track.id, { volume: Number(e.target.value) }))
                   }
+                  onPointerUp={onCommitDrag}
                 />
                 <span className="mono">{Math.round((selMusic.track.volume ?? 1) * 100)}%</span>
               </label>
@@ -569,7 +601,8 @@ export function TimelineEditor({
                     max={MAX_ZOOM}
                     step={0.05}
                     value={selectedClip.motion.from.zoom}
-                    onChange={(e) => applyMotion({ from: { zoom: Number(e.target.value) } })}
+                    onChange={(e) => applyMotion({ from: { zoom: Number(e.target.value) } }, true)}
+                    onPointerUp={onCommitDrag}
                   />
                   <span className="mono">{selectedClip.motion.from.zoom.toFixed(2)}×</span>
                 </label>
@@ -581,7 +614,8 @@ export function TimelineEditor({
                     max={1}
                     step={0.02}
                     value={selectedClip.motion.from.panX}
-                    onChange={(e) => applyMotion({ from: { panX: Number(e.target.value) } })}
+                    onChange={(e) => applyMotion({ from: { panX: Number(e.target.value) } }, true)}
+                    onPointerUp={onCommitDrag}
                   />
                 </label>
                 <label>
@@ -592,7 +626,8 @@ export function TimelineEditor({
                     max={1}
                     step={0.02}
                     value={selectedClip.motion.from.panY}
-                    onChange={(e) => applyMotion({ from: { panY: Number(e.target.value) } })}
+                    onChange={(e) => applyMotion({ from: { panY: Number(e.target.value) } }, true)}
+                    onPointerUp={onCommitDrag}
                   />
                 </label>
               </div>
@@ -606,7 +641,8 @@ export function TimelineEditor({
                     max={MAX_ZOOM}
                     step={0.05}
                     value={selectedClip.motion.to.zoom}
-                    onChange={(e) => applyMotion({ to: { zoom: Number(e.target.value) } })}
+                    onChange={(e) => applyMotion({ to: { zoom: Number(e.target.value) } }, true)}
+                    onPointerUp={onCommitDrag}
                   />
                   <span className="mono">{selectedClip.motion.to.zoom.toFixed(2)}×</span>
                 </label>
@@ -618,7 +654,8 @@ export function TimelineEditor({
                     max={1}
                     step={0.02}
                     value={selectedClip.motion.to.panX}
-                    onChange={(e) => applyMotion({ to: { panX: Number(e.target.value) } })}
+                    onChange={(e) => applyMotion({ to: { panX: Number(e.target.value) } }, true)}
+                    onPointerUp={onCommitDrag}
                   />
                 </label>
                 <label>
@@ -629,7 +666,8 @@ export function TimelineEditor({
                     max={1}
                     step={0.02}
                     value={selectedClip.motion.to.panY}
-                    onChange={(e) => applyMotion({ to: { panY: Number(e.target.value) } })}
+                    onChange={(e) => applyMotion({ to: { panY: Number(e.target.value) } }, true)}
+                    onPointerUp={onCommitDrag}
                   />
                 </label>
               </div>
@@ -647,7 +685,8 @@ export function TimelineEditor({
                   max={MAX_ZOOM}
                   step={0.05}
                   value={zoomPan.zoom}
-                  onChange={(e) => applyCrop(Number(e.target.value), zoomPan.panX, zoomPan.panY)}
+                  onChange={(e) => applyCrop(Number(e.target.value), zoomPan.panX, zoomPan.panY, true)}
+                  onPointerUp={onCommitDrag}
                 />
                 <span className="mono">{zoomPan.zoom.toFixed(2)}×</span>
               </label>
@@ -660,7 +699,8 @@ export function TimelineEditor({
                   step={0.02}
                   value={zoomPan.panX}
                   disabled={zoomPan.zoom <= 1.001}
-                  onChange={(e) => applyCrop(zoomPan.zoom, Number(e.target.value), zoomPan.panY)}
+                  onChange={(e) => applyCrop(zoomPan.zoom, Number(e.target.value), zoomPan.panY, true)}
+                  onPointerUp={onCommitDrag}
                 />
               </label>
               <label>
@@ -672,7 +712,8 @@ export function TimelineEditor({
                   step={0.02}
                   value={zoomPan.panY}
                   disabled={zoomPan.zoom <= 1.001}
-                  onChange={(e) => applyCrop(zoomPan.zoom, zoomPan.panX, Number(e.target.value))}
+                  onChange={(e) => applyCrop(zoomPan.zoom, zoomPan.panX, Number(e.target.value), true)}
+                  onPointerUp={onCommitDrag}
                 />
               </label>
               <label>
@@ -683,7 +724,8 @@ export function TimelineEditor({
                   max={MAX_ROTATION}
                   step={1}
                   value={selectedClip.rotation ?? 0}
-                  onChange={(e) => applyRotation(Number(e.target.value))}
+                  onChange={(e) => applyRotation(Number(e.target.value), true)}
+                  onPointerUp={onCommitDrag}
                 />
                 <span className="mono">{(selectedClip.rotation ?? 0).toFixed(0)}°</span>
               </label>
@@ -700,6 +742,36 @@ export function TimelineEditor({
               <button className="chip" onClick={() => onChange(setMotion(timeline, selectedClip.id, DEFAULT_MOTION))}>
                 🎥 Add motion
               </button>
+              {isFirstBaseClip(timeline, selectedClip.id) && (
+                <label>
+                  Fade in from black
+                  <input
+                    type="range"
+                    min={0}
+                    max={MAX_EDGE_FADE}
+                    step={0.1}
+                    value={selectedClip.fadeInFromBlack ?? 0}
+                    onChange={(e) => applyFadeToBlack({ fadeInFromBlack: Number(e.target.value) }, true)}
+                    onPointerUp={onCommitDrag}
+                  />
+                  <span className="mono">{(selectedClip.fadeInFromBlack ?? 0).toFixed(1)}s</span>
+                </label>
+              )}
+              {isLastBaseClip(timeline, selectedClip.id) && (
+                <label>
+                  Fade out to black
+                  <input
+                    type="range"
+                    min={0}
+                    max={MAX_EDGE_FADE}
+                    step={0.1}
+                    value={selectedClip.fadeOutToBlack ?? 0}
+                    onChange={(e) => applyFadeToBlack({ fadeOutToBlack: Number(e.target.value) }, true)}
+                    onPointerUp={onCommitDrag}
+                  />
+                  <span className="mono">{(selectedClip.fadeOutToBlack ?? 0).toFixed(1)}s</span>
+                </label>
+              )}
               {selectedIsVideo && (
                 <>
                   <label className="tl-check">
@@ -720,7 +792,8 @@ export function TimelineEditor({
                           max={1}
                           step={0.05}
                           value={selectedClip.volume ?? 1}
-                          onChange={(e) => applyVideoAudio({ volume: Number(e.target.value) })}
+                          onChange={(e) => applyVideoAudio({ volume: Number(e.target.value) }, true)}
+                          onPointerUp={onCommitDrag}
                         />
                         <span className="mono">{Math.round((selectedClip.volume ?? 1) * 100)}%</span>
                       </label>
@@ -759,7 +832,13 @@ export function TimelineEditor({
                   max={1}
                   step={0.02}
                   value={selOverlay.clip.position?.x ?? 0}
-                  onChange={(e) => applyOverlayTransform({ position: { x: Number(e.target.value), y: selOverlay.clip.position?.y ?? 0 } })}
+                  onChange={(e) =>
+                    applyOverlayTransform(
+                      { position: { x: Number(e.target.value), y: selOverlay.clip.position?.y ?? 0 } },
+                      true,
+                    )
+                  }
+                  onPointerUp={onCommitDrag}
                 />
               </label>
               <label>
@@ -770,7 +849,13 @@ export function TimelineEditor({
                   max={1}
                   step={0.02}
                   value={selOverlay.clip.position?.y ?? 0}
-                  onChange={(e) => applyOverlayTransform({ position: { x: selOverlay.clip.position?.x ?? 0, y: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    applyOverlayTransform(
+                      { position: { x: selOverlay.clip.position?.x ?? 0, y: Number(e.target.value) } },
+                      true,
+                    )
+                  }
+                  onPointerUp={onCommitDrag}
                 />
               </label>
               <label>
@@ -781,7 +866,8 @@ export function TimelineEditor({
                   max={0.9}
                   step={0.02}
                   value={selOverlay.clip.scale ?? 0.3}
-                  onChange={(e) => applyOverlayTransform({ scale: Number(e.target.value) })}
+                  onChange={(e) => applyOverlayTransform({ scale: Number(e.target.value) }, true)}
+                  onPointerUp={onCommitDrag}
                 />
                 <span className="mono">{Math.round((selOverlay.clip.scale ?? 0.3) * 100)}%</span>
               </label>
@@ -819,8 +905,9 @@ export function TimelineEditor({
                       step={0.05}
                       value={Math.min(transitionClip.transitionIn?.duration ?? Math.min(0.5, transitionMax), transitionMax)}
                       onChange={(e) =>
-                        applyTransition(transitionClip.transitionIn?.style ?? 'dissolve', Number(e.target.value))
+                        applyTransition(transitionClip.transitionIn?.style ?? 'dissolve', Number(e.target.value), true)
                       }
+                      onPointerUp={onCommitDrag}
                     />
                     <span className="mono">
                       {Math.min(transitionClip.transitionIn?.duration ?? Math.min(0.5, transitionMax), transitionMax).toFixed(2)}s

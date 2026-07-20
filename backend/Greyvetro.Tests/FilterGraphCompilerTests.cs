@@ -1088,4 +1088,155 @@ public class FilterGraphCompilerTests
         Assert.DoesNotContain("xfade", Norm(plan.FilterComplex));
         Assert.Contains("concat=n=2:v=1:a=0[vout]", Norm(plan.FilterComplex));
     }
+
+    // --- Fade from/to black at the base track's own start/end (Phase 6 scope-cut follow-up) ---
+
+    [Fact]
+    public void Compile_FadeInFromBlack_OnFirstClip_EmitsFadeFilter()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[0] = clips[0] with { FadeInFromBlack = 1.5 };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains(
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30," +
+            "fade=t=in:st=0:d=1.5:color=black[v0]",
+            Norm(plan.FilterComplex));
+        // The other (unaffected) clips stay byte-identical to the legacy chain.
+        Assert.Contains(
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1]",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_FadeOutToBlack_OnLastClip_EmitsFadeFilter()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[2] = clips[2] with { FadeOutToBlack = 2.0 }; // c2: Duration = 4.5
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains(
+            "[2:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30," +
+            "fade=t=out:st=2.5:d=2:color=black[v2]",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_FadeToBlack_OnAnyOtherClip_IsIgnored()
+    {
+        // FadeInFromBlack only honors index 0; FadeOutToBlack only honors the last index — set both
+        // (wrongly) on the middle clip and confirm the compiler drops them rather than trusting
+        // whatever's stored, mirroring how TransitionIn self-restricts to non-first clips.
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[1] = clips[1] with { FadeInFromBlack = 1.0, FadeOutToBlack = 1.0 };
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains(
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v1]",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_FadeInFromBlack_LongerThanClip_IsClampedToClipDuration()
+    {
+        var (timeline, paths) = LegacyLikeCase();
+        var photo = timeline.Tracks[0];
+        var clips = photo.Clips.ToList();
+        clips[0] = clips[0] with { FadeInFromBlack = 10 }; // c0: Duration = 2.5
+        timeline = timeline with { Tracks = [photo with { Clips = clips }, timeline.Tracks[1]] };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        Assert.Contains("fade=t=in:st=0:d=2.5:color=black[v0]", Norm(plan.FilterComplex));
+    }
+
+    // --- Video own-audio auto-crossfade to match a visual transition (Phase 6 scope-cut follow-up) ---
+
+    [Fact]
+    public void Compile_VideoClipIncludeAudio_AutoCrossfadesToMatchAdjacentTransitions()
+    {
+        // photo(c0, 3s) -[1s dissolve]-> video(c1, 4s, IncludeAudio) -[0.6s dissolve]-> photo(c2, 2s).
+        // The video's own audio should fade in over the incoming transition and fade out over the
+        // outgoing one, with no manual FadeIn/FadeOut set.
+        var timeline = new Timeline
+        {
+            OutputWidth = 1080, OutputHeight = 1920, Fps = 30,
+            Tracks =
+            [
+                new Track
+                {
+                    Type = TrackType.Photo, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip { Id = "c0", SourceId = "img-0", StartTime = 0, Duration = 3 },
+                        new Clip { Id = "c2", SourceId = "img-1", StartTime = 5.4, Duration = 2,
+                            TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 0.6 } },
+                    ],
+                },
+                new Track
+                {
+                    Type = TrackType.Video, ZIndex = 0,
+                    Clips =
+                    [
+                        new Clip
+                        {
+                            Id = "c1", SourceId = "vid", StartTime = 2, Duration = 4, IncludeAudio = true,
+                            TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 1 },
+                        },
+                    ],
+                },
+                new Track { Type = TrackType.Audio, Clips = [new Clip { SourceId = "voice", Duration = 6 }] },
+            ],
+            Assets = [new MediaAsset { Id = "vid", Type = MediaType.Video }],
+        };
+        var paths = new Dictionary<string, string>
+        {
+            ["img-0"] = "/tmp/a.jpg", ["img-1"] = "/tmp/b.jpg", ["vid"] = "/tmp/v.mp4", ["voice"] = "/tmp/voice.mp3",
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // Input order is start-time order: c0 (0) -> c1 (2) -> c2 (5.4), so the video's own audio is
+        // input index 1 — its afade-in (1s, matching the incoming transition) and afade-out (0.6s,
+        // matching the outgoing one) both derive purely from the transitions, no manual fade set.
+        Assert.Contains(
+            "[1:a]afade=t=in:st=0:d=1,afade=t=out:st=3.4:d=0.6,adelay=2000:all=1",
+            Norm(plan.FilterComplex));
+    }
+
+    [Fact]
+    public void Compile_VideoClipIncludeAudio_ManualFadeLargerThanTransition_KeepsManualFade()
+    {
+        var (timeline, paths) = PhotoPlusVideoCase(); // photo c0 (3s) then video vc (4s) at t=3
+        timeline = timeline with
+        {
+            Tracks = timeline.Tracks.Select(t => t.Type != TrackType.Video ? t : t with
+            {
+                Clips = [t.Clips[0] with
+                {
+                    IncludeAudio = true,
+                    FadeIn = 2, // larger than the (clamped) 1s transition below
+                    TransitionIn = new Transition { Style = TransitionStyle.Dissolve, Duration = 1 },
+                }],
+            }).ToList(),
+        };
+
+        var plan = _compiler.Compile(timeline, paths);
+
+        // The manual FadeIn (2s) wins over the transition-derived auto-fade (1s) — never shortened.
+        Assert.Contains("afade=t=in:st=0:d=2", Norm(plan.FilterComplex));
+        Assert.DoesNotContain("afade=t=in:st=0:d=1,", Norm(plan.FilterComplex));
+    }
 }

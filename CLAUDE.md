@@ -361,9 +361,9 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        ref-based past/future stack — not `useState`, to dodge Strict Mode's
        double-invoked updaters double-pushing history) backs every edit path
        (editor edits, video/music/overlay adds, re-sync); Cmd/Ctrl+Z (+Shift
-       for redo) plus toolbar buttons. Scope cuts: no audio `acrossfade`, no
-       fade-from/to-black on the first/last clip, continuous slider drags
-       aren't coalesced into one undo step. Verified: backend 36/36 (5 new
+       for redo) plus toolbar buttons. Scope cuts (closed out below): no audio
+       `acrossfade`, no fade-from/to-black on the first/last clip, continuous
+       slider drags aren't coalesced into one undo step. Verified: backend 36/36 (5 new
        transition tests), `tsc -b && vite build` + lint clean, a real
        `/render` POST frame-sampled a genuine 50/50 blend mid-crossfade
        (pure red → blend → pure blue, total duration correctly 3+3−1=5s),
@@ -398,7 +398,45 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        limit (this session's automated Chrome never progresses any `<video>`
        past `readyState 0`, which also blocks the pre-existing `capturePoster`
        poster capture the same way) — not a regression from this change.
-     - Remaining: transitions/undo-redo scope cuts above, if ever needed.
+     - ✅ **Phase 6 scope-cut follow-up** (shipped 2026-07-20): closes all three
+       items noted above. **Video own-audio auto-crossfade**: a base-track video
+       clip with `IncludeAudio` now auto-fades its own audio in/out to match the
+       (clamped) duration of any adjacent `TransitionIn`, feeding into the same
+       `BuildAudioChain` `afade` machinery dedicated audio clips already used —
+       the larger of the transition-derived fade and any manual `FadeIn`/
+       `FadeOut` wins, so a manual fade is never shortened. **Fade from/to
+       black**: `Clip.FadeInFromBlack`/`FadeOutToBlack` add a plain `fade=…
+       :color=black` filter (not `xfade`, which needs a second stream); the
+       compiler only honors `FadeInFromBlack` on visual-clip index 0 and
+       `FadeOutToBlack` on the last index regardless of what's stored elsewhere
+       (self-restricting like `TransitionIn`'s `i>0` check), and clamps each
+       duration to the clip's own length. Web: a "Fade in from black"/"Fade out
+       to black" slider appears on the reframe inspector only when the selected
+       clip `isFirstBaseClip`/`isLastBaseClip` (`timelineOps.ts`); `splitClip`
+       drops the field from whichever half is no longer first/last. **Coalesced
+       slider undo**: `useTimelineHistory.ts` gained `setLive`/`commitLive` —
+       `setLive` (every `input` tick) updates the document without touching the
+       undo stack, capturing the pre-drag snapshot once; `commitLive`
+       (`pointerup`) pushes that single snapshot as one history entry; `undo`/
+       `redo`/`set` all flush a pending live edit first so a keyboard-only nudge
+       (no `pointerup`) or an undo mid-drag can't skip past it. All 18
+       `type="range"` inputs in `TimelineEditor.tsx` now go through a shared
+       `applyEdit` helper with `live: true` + `onPointerUp={onCommitDrag}` —
+       trim dragging already worked this way (local state, one commit on
+       pointer-up) and needed no change. Verified: backend 44/44 (6 new tests:
+       auto-crossfade across both transition edges, manual fade winning over
+       the auto floor, fade-in/out on first/last clip, ignored on a middle
+       clip, clamped to clip duration), `tsc -b && vite build` + lint clean
+       (zero new warnings), and a real `/render` POST for both ffmpeg-facing
+       features — frame-sampled pure black at t=0 fading to full color, near-
+       black approaching the end fade; audio at the noise floor outside the
+       video's audio window, full tone mid-clip, audibly ramped levels exactly
+       across both transition-overlap edges. The undo-coalescing UI wasn't
+       driven live in Chrome this round — the only project with a saved
+       timeline in this environment hits the `<video>` `readyState 0` Chrome-
+       automation limit noted above before the editor even mounts, not a
+       regression from this change; the mechanism mirrors the pre-existing,
+       already-verified trim-drag gesture rather than introducing a new pattern.
    - Phase 0 (repo rename) is deliberately deferred pending name confirmation
      (`greyvetro-studio` proposed). Later/optional: Gemini image generation
      (the key already has `gemini-3-pro-image` / nano-banana access), clip

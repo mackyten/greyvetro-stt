@@ -73,8 +73,15 @@ export interface Clip {
   // Crossfade into this base-track clip from the one immediately before it (Phase 6). The compiler
   // overlaps the two clips by `duration` seconds (ffmpeg `xfade`), so the base track's effective
   // length shrinks by that much at each transition — `reanchor` accounts for it. Ignored on the
-  // first base-track clip (no predecessor) and on overlay/audio/caption tracks.
+  // first base-track clip (no predecessor) and on overlay/audio/caption tracks. When this clip's
+  // own audio is mixed in (includeAudio), the backend also auto-crossfades that audio to match.
   transitionIn?: TransitionIn;
+
+  // Fade from/to pure black at the base track's own start/end — only meaningful on the very first
+  // (fadeInFromBlack) / last (fadeOutToBlack) base-track clip, since there's no predecessor/
+  // successor to crossfade with instead (see transitionIn for that case). Seconds.
+  fadeInFromBlack?: number;
+  fadeOutToBlack?: number;
 }
 
 export type TransitionStyle = 'dissolve' | 'fadeToBlack';

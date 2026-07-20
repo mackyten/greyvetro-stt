@@ -554,12 +554,9 @@ storyboard.
     dropped) — 36/36 backend total — plus a real `/render` POST: total duration
     correctly 3+3−1=5s for two 3s clips with a 1s dissolve, frame-sampled pure
     red before the transition window, a genuine ~50/50 red/blue blend at the
-    window's midpoint, pure blue after. **Scope cut:** only base-track (photo/
-    video) crossfades — no audio `acrossfade` (this product's audio model rarely
-    has multiple sequential same-track clips; voiceover is one clip, music
-    tracks span independently) and no fade-from/to-black on the very first/last
-    clip (no predecessor to overlap with) — both left as later refinements, not
-    wired up.
+    window's midpoint, pure blue after. **Scope cut (closed out below):** only
+    base-track (photo/video) crossfades — no audio `acrossfade` and no fade-
+    from/to-black on the very first/last clip.
   - **Zoom + snapping** (frontend-only). `TimelineEditor` replaced the old
     percentage-of-container clip layout with an explicit pixels-per-second
     (`pxPerSecond`, 20–400 range, 🔍−/🔍+/Fit chips) driving a fixed content
@@ -586,13 +583,70 @@ storyboard.
     edit path — the editor's `onChange`, the video/music/overlay file handlers,
     and re-sync — now goes through instead of a bare `setState`. Cmd/Ctrl+Z
     (Shift for redo) plus toolbar Undo/Redo buttons, both disabled at the
-    stack's edge. **Known v1 limitation, not engineered around:** continuous
-    slider drags (volume, fade, zoom/pan/tilt, transition duration, overlay
-    position/scale) call `onChange` on every `input` tick, so dragging one
-    slider produces many undo entries instead of one coalesced step — acceptable
-    for v1, a later refinement if it proves annoying in practice.
+    stack's edge. Continuous slider drags weren't coalesced into one undo step
+    at ship time — closed out below.
   - Verified overall: backend 36/36, `tsc -b && vite build` + lint clean (zero
     new warnings), and the interactive checks above driven live in Chrome.
+- ✅ **Phase 6 scope-cut follow-up (shipped 2026-07-20)** — closes out all three
+  items noted above.
+  - **Video own-audio auto-crossfade.** Rather than a general audio-track
+    `acrossfade` (this product's audio model rarely has multiple sequential
+    same-track clips — voiceover is one clip, music tracks span independently),
+    the useful case is a base-track video clip's own included audio
+    (`Clip.IncludeAudio`) across a visual `TransitionIn`: `FilterGraphCompiler`
+    now derives that clip's auto fade-in/-out directly from the (clamped)
+    incoming/outgoing transition duration and feeds it into the existing
+    `BuildAudioChain` `afade` machinery, taking the larger of that and any
+    manually-set `FadeIn`/`FadeOut` so a manual fade is never shortened. No new
+    ffmpeg filter — reuses the per-clip `afade` two dedicated-audio-clips
+    already had. Verified: 2 new xUnit cases (auto-derived fade in+out across
+    both transition edges of a three-clip photo→video→photo timeline; a larger
+    manual `FadeIn` winning over the transition-derived floor) — 44/44 backend
+    total — plus a real `/render` POST: exported audio at the noise floor
+    outside a video clip's audio window, full tone in its sustained middle, and
+    audibly ramped levels exactly across both transition-overlap edges.
+  - **Fade-from/to-black at the very first/last clip.** `Clip.FadeInFromBlack`/
+    `FadeOutToBlack` (seconds) add a plain ffmpeg `fade=t=in/out:…:color=black`
+    to the per-clip chain — deliberately not `xfade` (which needs a second
+    stream) since there's no predecessor/successor to fade with here. The
+    compiler only honors `FadeInFromBlack` on visual-clip index 0 and
+    `FadeOutToBlack` on the last index regardless of what's stored elsewhere,
+    self-restricting the same way `TransitionIn`'s `i>0` check does, so a stale
+    value left on a clip after a reorder is inert rather than rendering a
+    surprise fade mid-timeline. Each duration is clamped to the clip's own
+    length. Web: the reframe inspector shows a "Fade in from black" /
+    "Fade out to black" slider only when the selected clip is
+    `isFirstBaseClip`/`isLastBaseClip` (`timelineOps.ts`); `splitClip` drops
+    the field from the half that's no longer first/last. Verified: 4 new xUnit
+    cases (emits on first/last, ignored on a middle clip even if set, clamped
+    to the clip's own duration) plus a real `/render` POST — frame-sampled
+    pure black at t=0 and near-black approaching both edges, full color mid-clip.
+  - **Coalesced slider-drag undo steps.** `useTimelineHistory.ts` gained
+    `setLive`/`commitLive` alongside `set`: `setLive` (called on every `input`
+    tick of a range drag) updates the visible document without touching the
+    undo stack, capturing the pre-drag document once in a `dragBaseline` ref;
+    `commitLive` (called on `pointerup`) pushes that single baseline as one
+    history entry. `undo`/`redo`/`set` all flush any pending live edit first
+    (same push-baseline-once logic) so a keyboard-only slider nudge — which
+    never fires `pointerup` — or an undo pressed mid-drag can't silently skip
+    past an uncommitted edit. `TimelineScreen` wires `onChangeLive` (state
+    only, no `saveTimeline` yet) and `onCommitDrag` (flushes history +
+    persists) down to `TimelineEditor`, which now passes `live: true` through
+    a shared `applyEdit` helper for its 18 `type="range"` inputs (volume,
+    fade-to-black, zoom/pan/tilt, motion keyframes, overlay position/scale,
+    transition duration) and adds `onPointerUp={onCommitDrag}` to each — trim
+    dragging was already coalesced this way (local component state, one commit
+    on pointer-up) and needed no change. Verified: `tsc -b && vite build` +
+    lint clean (zero new warnings; an initial ternary-as-statement draft was
+    refactored into the `applyEdit` if/else to satisfy oxlint). Not driven live
+    in Chrome this round — the only project with a saved timeline in this
+    environment has a video asset that hits the documented Chrome-automation
+    limitation from the frame-accurate-scrub-preview entry above (`<video>`
+    never leaves `readyState 0`), which hangs the Timeline tab's own
+    poster-capture load step before the editor ever mounts — not a regression
+    from this change. The mechanism itself mirrors the pre-existing trim-drag
+    gesture (local state during the drag, one commit at pointer-up) rather than
+    introducing a new pattern.
 - **Later / separate scope — Video-clip ingestion.** Upload real video as source
   media (probe duration/dimensions, frame-seek preview). Deferred because it's
   greenfield and drives the hardest preview-performance problems.
