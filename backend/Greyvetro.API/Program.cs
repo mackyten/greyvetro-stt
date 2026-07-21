@@ -37,8 +37,15 @@ app.UseCors();
 
 app.MapGet("/voices", async (GetVoicesHandler handler, CancellationToken ct) =>
 {
-    var voices = await handler.HandleAsync(new GetVoicesQuery(), ct);
-    return Results.Ok(voices);
+    try
+    {
+        var voices = await handler.HandleAsync(new GetVoicesQuery(), ct);
+        return Results.Ok(voices);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: (int?)ex.StatusCode ?? 500);
+    }
 });
 
 app.MapGet("/usage", async (GetUsageHandler handler, CancellationToken ct) =>
@@ -246,8 +253,15 @@ app.MapPost("/voices/clone", async (HttpRequest http, CloneVoiceHandler handler,
     var name = form["name"].ToString();
     var description = form["description"].ToString();
     var samples = form.Files.Select(f => f.OpenReadStream());
-    var voice = await handler.HandleAsync(new CloneVoiceCommand(name, description, samples), ct);
-    return Results.Ok(voice);
+    try
+    {
+        var voice = await handler.HandleAsync(new CloneVoiceCommand(name, description, samples), ct);
+        return Results.Ok(voice);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: (int?)ex.StatusCode ?? 500);
+    }
 });
 
 app.Run();

@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using ElevenLabs;
 using ElevenLabs.Models;
@@ -13,7 +14,15 @@ public class ElevenLabsService(ElevenLabsClient client, HttpClient http, ILogger
 {
     public async Task<IReadOnlyList<Domain.Entities.Voice>> GetVoicesAsync(CancellationToken ct = default)
     {
-        var voices = await client.VoicesEndpoint.GetAllVoicesAsync(ct);
+        IReadOnlyList<global::ElevenLabs.Voices.Voice> voices;
+        try
+        {
+            voices = await client.VoicesEndpoint.GetAllVoicesAsync(ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw CleanedError(ex);
+        }
         // "premade" = free built-in voices; "cloned" = the user's own (paid) voices.
         // Generated/professional categories are excluded to keep the list free-tier friendly.
         var result = voices
@@ -34,7 +43,15 @@ public class ElevenLabsService(ElevenLabsClient client, HttpClient http, ILogger
 
     public async Task<Domain.Entities.Usage> GetUsageAsync(CancellationToken ct = default)
     {
-        var sub = await client.UserEndpoint.GetSubscriptionInfoAsync(ct);
+        global::ElevenLabs.User.SubscriptionInfo sub;
+        try
+        {
+            sub = await client.UserEndpoint.GetSubscriptionInfoAsync(ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw CleanedError(ex);
+        }
         return new Domain.Entities.Usage
         {
             CharacterCount = sub.CharacterCount,
@@ -53,14 +70,29 @@ public class ElevenLabsService(ElevenLabsClient client, HttpClient http, ILogger
         var ttsRequest = new TextToSpeechRequest(
             voice, request.Text, System.Text.Encoding.UTF8, voiceSettings,
             OutputFormat.MP3_44100_128, model, null, null, null, null, null, false, null, null);
-        var clip = await client.TextToSpeechEndpoint.TextToSpeechAsync(ttsRequest, null, ct);
-        return new MemoryStream(clip.ClipData.ToArray());
+        try
+        {
+            var clip = await client.TextToSpeechEndpoint.TextToSpeechAsync(ttsRequest, null, ct);
+            return new MemoryStream(clip.ClipData.ToArray());
+        }
+        catch (HttpRequestException ex)
+        {
+            throw CleanedError(ex);
+        }
     }
 
     public async Task<Domain.Entities.Voice> CloneVoiceAsync(string name, string description, IEnumerable<Stream> samples, CancellationToken ct = default)
     {
         var request = new VoiceRequest(name, samples, null, description);
-        var cloned = await client.VoicesEndpoint.AddVoiceAsync(request, ct);
+        global::ElevenLabs.Voices.Voice cloned;
+        try
+        {
+            cloned = await client.VoicesEndpoint.AddVoiceAsync(request, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw CleanedError(ex);
+        }
         return new Domain.Entities.Voice
         {
             Id = cloned.Id,
@@ -83,7 +115,7 @@ public class ElevenLabsService(ElevenLabsClient client, HttpClient http, ILogger
         {
             var body = await response.Content.ReadAsStringAsync(ct);
             logger.LogWarning("Scribe transcription failed ({Status}): {Body}", response.StatusCode, body);
-            throw new HttpRequestException($"ElevenLabs transcription failed: {body}", null, response.StatusCode);
+            throw new HttpRequestException(ExtractErrorMessage(body), null, response.StatusCode);
         }
 
         var result = await response.Content.ReadFromJsonAsync<ScribeResponse>(ct)
@@ -102,6 +134,42 @@ public class ElevenLabsService(ElevenLabsClient client, HttpClient http, ILogger
                 Type = w.Type ?? "word"
             }).ToList() ?? []
         };
+    }
+
+    // The ElevenLabs-DotNet SDK wraps every non-success response as
+    // "<Method> Failed! HTTP status code: <code> | Response body: <raw JSON>" — the JSON
+    // itself nests the human-readable text under detail.message (or is a bare string for
+    // simple validation errors, e.g. quota-exceeded / plan-required responses). Surfacing
+    // the SDK's wrapper as-is would dump that whole string into the UI; pull out just the
+    // sentence, same approach as GeminiService.ExtractErrorMessage.
+    private static HttpRequestException CleanedError(HttpRequestException ex)
+    {
+        const string marker = "Response body: ";
+        var index = ex.Message.IndexOf(marker, StringComparison.Ordinal);
+        var body = index < 0 ? ex.Message : ex.Message[(index + marker.Length)..];
+        return new HttpRequestException(ExtractErrorMessage(body), ex, ex.StatusCode);
+    }
+
+    private static string ExtractErrorMessage(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("detail", out var detail))
+            {
+                if (detail.ValueKind == JsonValueKind.String)
+                    return detail.GetString() ?? body;
+                if (detail.ValueKind == JsonValueKind.Object &&
+                    detail.TryGetProperty("message", out var message) &&
+                    message.GetString() is { Length: > 0 } text)
+                    return text;
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON (or an unexpected shape) — fall through to the raw body.
+        }
+        return body;
     }
 
     private sealed record ScribeResponse(
