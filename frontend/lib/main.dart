@@ -22,7 +22,7 @@ class GreyvetroApp extends StatelessWidget {
         return ThemeScope(
           controller: themeController,
           child: MaterialApp(
-            title: 'Greyvetro TTS',
+            title: 'Greyvetro Studio',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.light,
             darkTheme: AppTheme.dark,
