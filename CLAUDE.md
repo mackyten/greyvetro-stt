@@ -482,23 +482,20 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
      this **and** the existing text/scenes calls, and the web `checkStatus`
      (`core/api.ts`) now unwraps ASP.NET's ProblemDetails `detail` field — so
      every API error toast app-wide shows one readable sentence instead of a
-     raw JSON dump, not just this endpoint. **Known gap, not a bug in this
-     code:** live-tested against the real Gemini API 2026-07-21 — every
-     image-output model (`gemini-3-pro-image`, `gemini-2.5-flash-image`,
-     `gemini-3.1-flash-image`) returns `429 RESOURCE_EXHAUSTED` with
-     **`limit: 0`** on the free tier, unlike text generation which has always
-     worked free. This needs billing enabled on the *exact* Google Cloud
-     project this `GEMINI_APIKEY` belongs to — AI Studio keys are
-     project-scoped, so billing enabled elsewhere doesn't help; confirm which
-     project backs the current key at aistudio.google.com/apikey. The manual
-     Flow-copy-paste path is untouched as the free fallback while billing is
-     sorted out. Verified: backend 44/44, `tsc -b && vite build` + lint clean,
-     and a full live browser run (Studio → save take → Storyboard → Generate
-     storyboard → Generate images) — the batch flow called the endpoint,
-     surfaced the concise quota/billing message in a toast, and reported
-     "Image generation failed for all scenes." rather than hanging or
-     crashing; will start producing real images the moment the key's project
-     has billing linked, with no code change needed.
+     raw JSON dump, not just this endpoint. **Billing gap resolved
+     2026-07-21:** live-tested against the real Gemini API the same day —
+     every image-output model (`gemini-3-pro-image`, `gemini-2.5-flash-image`,
+     `gemini-3.1-flash-image`) initially returned `429 RESOURCE_EXHAUSTED`
+     with **`limit: 0`** on the free tier, unlike text generation which has
+     always worked free. AI Studio keys are project-scoped, so billing
+     enabled elsewhere doesn't help — the fix was linking billing to the
+     *exact* Google Cloud project backing this `GEMINI_APIKEY` (confirmed via
+     aistudio.google.com/apikey). Verified end-to-end after linking: a live
+     `POST /script/scenes/image` call returned a real generated JPEG (9:16,
+     ~750KB). The feature is now fully functional, not just wired-and-blocked;
+     the manual Flow-copy-paste path remains as a free-tier fallback for
+     anyone without billing enabled. Backend 44/44, `tsc -b && vite build` +
+     lint clean.
 
 ### Candidate additions
 - ✅ **Voice settings** — "Voice settings" card in the composer: **Stability**, **Similarity**, **Style** sliders + a **Speaker boost** toggle (on by default — strongest lever for cloned-voice likeness). All four flow through `TtsRequest` → `VoiceSettings`, are stored per gallery item, and restored on edit/regenerate. (Flutter still hardcodes `eleven_multilingual_v2`; the **web** frontend has a Model dropdown — v2 / Eleven v3 / Turbo / Flash — carried through `/tts` `modelId`, gallery items, and presets.)

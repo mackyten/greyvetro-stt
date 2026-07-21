@@ -3,6 +3,7 @@ import '../../core/api_client.dart';
 import '../../core/audio_player.dart';
 import '../../core/theme.dart';
 import 'create_voice_screen.dart';
+import 'favorites_repository.dart';
 import 'voice_model.dart';
 
 class VoicesScreen extends StatefulWidget {
@@ -26,8 +27,11 @@ class VoicesScreen extends StatefulWidget {
 class _VoicesScreenState extends State<VoicesScreen> {
   late Future<List<VoiceModel>> _voices;
   final _searchController = TextEditingController();
+  final _favoritesRepo = FavoritesRepository();
   String _query = '';
   String? _genderFilter;
+  Set<String> _favorites = {};
+  bool _favoritesOnly = false;
 
   @override
   void initState() {
@@ -36,6 +40,21 @@ class _VoicesScreenState extends State<VoicesScreen> {
     _searchController.addListener(
       () => setState(() => _query = _searchController.text.trim().toLowerCase()),
     );
+    _favoritesRepo.load().then((ids) {
+      if (mounted) setState(() => _favorites = ids);
+    });
+  }
+
+  Future<void> _toggleFavorite(String voiceId) async {
+    final ids = await _favoritesRepo.toggle(voiceId);
+    if (mounted) setState(() => _favorites = ids);
+  }
+
+  /// Favorited voices float to the top, original order preserved within each group.
+  List<VoiceModel> _sortFavoritesFirst(List<VoiceModel> list) {
+    final favs = list.where((v) => _favorites.contains(v.id)).toList();
+    final rest = list.where((v) => !_favorites.contains(v.id)).toList();
+    return [...favs, ...rest];
   }
 
   @override
@@ -58,6 +77,7 @@ class _VoicesScreenState extends State<VoicesScreen> {
         (v.gender?.toLowerCase() != _genderFilter!.toLowerCase())) {
       return false;
     }
+    if (_favoritesOnly && !_favorites.contains(v.id)) return false;
     if (_query.isEmpty) return true;
     return v.name.toLowerCase().contains(_query) ||
         v.description.toLowerCase().contains(_query) ||
@@ -106,13 +126,13 @@ class _VoicesScreenState extends State<VoicesScreen> {
           ..sort();
 
         final filtered = all.where(_matches).toList();
-        final custom = filtered.where((v) => v.isCustom).toList();
-        final builtIn = filtered.where((v) => !v.isCustom).toList();
+        final custom = _sortFavoritesFirst(filtered.where((v) => v.isCustom).toList());
+        final builtIn = _sortFavoritesFirst(filtered.where((v) => !v.isCustom).toList());
 
         return Column(
           children: [
             _searchBar(),
-            if (genders.isNotEmpty) _genderChips(genders),
+            _filterChips(genders),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _reload,
@@ -188,7 +208,7 @@ class _VoicesScreenState extends State<VoicesScreen> {
     );
   }
 
-  Widget _genderChips(List<String> genders) => SizedBox(
+  Widget _filterChips(List<String> genders) => SizedBox(
         height: 44,
         child: ListView(
           scrollDirection: Axis.horizontal,
@@ -202,22 +222,39 @@ class _VoicesScreenState extends State<VoicesScreen> {
                   () => setState(
                       () => _genderFilter = _genderFilter == g ? null : g),
                 )),
+            _chip(
+              'Favorites',
+              _favoritesOnly,
+              () => setState(() => _favoritesOnly = !_favoritesOnly),
+              icon: _favoritesOnly ? Icons.star_rounded : Icons.star_border_rounded,
+              activeColor: context.brand.warning,
+            ),
           ],
         ),
       );
 
-  Widget _chip(String label, bool selected, VoidCallback onTap) {
+  Widget _chip(
+    String label,
+    bool selected,
+    VoidCallback onTap, {
+    IconData? icon,
+    Color? activeColor,
+  }) {
     final c = context.brand;
+    final selectedColor = activeColor ?? c.blueDeep;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ChoiceChip(
+        avatar: icon != null
+            ? Icon(icon, size: 16, color: selected ? selectedColor : c.text3)
+            : null,
         label: Text(label),
         selected: selected,
         onSelected: (_) => onTap(),
         showCheckmark: false,
         backgroundColor: c.surface,
-        selectedColor: c.blue.withValues(alpha: 0.28),
-        side: BorderSide(color: selected ? c.blueDeep : c.outline),
+        selectedColor: selectedColor.withValues(alpha: 0.28),
+        side: BorderSide(color: selected ? selectedColor : c.outline),
         labelStyle: TextStyle(
           color: c.text,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -296,6 +333,20 @@ class _VoicesScreenState extends State<VoicesScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _favoriteButton(VoiceModel v) {
+    final c = context.brand;
+    final isFavorite = _favorites.contains(v.id);
+    return IconButton(
+      icon: Icon(
+        isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+        color: isFavorite ? c.warning : c.text3,
+      ),
+      tooltip: isFavorite ? 'Remove from favorites' : 'Add to favorites',
+      onPressed: () => _toggleFavorite(v.id),
+      splashRadius: 20,
     );
   }
 
@@ -385,8 +436,11 @@ class _VoicesScreenState extends State<VoicesScreen> {
                     ],
                   ),
                 ),
-                if (selected)
+                _favoriteButton(v),
+                if (selected) ...[
+                  const SizedBox(width: 4),
                   Icon(Icons.check_circle_rounded, color: c.blueDeep),
+                ],
               ],
             ),
           ),

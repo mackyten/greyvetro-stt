@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getVoices } from '../../core/api';
+import { favoriteVoiceIds, toggleFavoriteVoice } from '../../core/favorites';
 import { Icon } from '../../core/Icon';
 import { voiceTagline, type Voice } from '../../core/types';
 import { CreateVoiceModal } from './CreateVoiceModal';
@@ -20,6 +21,13 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [favorites, setFavorites] = useState<Set<string>>(favoriteVoiceIds);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+
+  const toggleFavorite = (e: React.MouseEvent | React.KeyboardEvent, id: string) => {
+    e.stopPropagation();
+    setFavorites(toggleFavoriteVoice(id));
+  };
 
   // Stop whatever preview clip is playing when the picker unmounts (voice
   // selected, or the modal is closed) — pause() doesn't fire 'ended', so this
@@ -61,13 +69,16 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
   const filtered = useMemo(() => {
     if (!voices) return [];
     const q = search.trim().toLowerCase();
-    return voices.filter((v) => {
+    const matches = voices.filter((v) => {
       if (gender !== 'all' && v.labels['gender']?.toLowerCase() !== gender) return false;
+      if (favoritesOnly && !favorites.has(v.id)) return false;
       if (q && !v.name.toLowerCase().includes(q) && !voiceTagline(v).toLowerCase().includes(q))
         return false;
       return true;
     });
-  }, [voices, search, gender]);
+    // Favorited voices float to the top; stable sort preserves order within each group.
+    return [...matches].sort((a, b) => Number(favorites.has(b.id)) - Number(favorites.has(a.id)));
+  }, [voices, search, gender, favorites, favoritesOnly]);
 
   return (
     <>
@@ -101,6 +112,12 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
                 {g === 'all' ? 'All' : g === 'male' ? 'Male' : 'Female'}
               </button>
             ))}
+            <button
+              className={`chip favorite-chip${favoritesOnly ? ' active' : ''}`}
+              onClick={() => setFavoritesOnly((f) => !f)}
+            >
+              <Icon name={favoritesOnly ? 'star' : 'star_border'} /> Favorites
+            </button>
           </div>
           <div className="modal-list">
             {error && (
@@ -128,6 +145,21 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
                   <div className="vname">{v.name}</div>
                   <div className="vtag">{voiceTagline(v)}</div>
                 </div>
+                <span
+                  className={`icon-btn favorite-btn${favorites.has(v.id) ? ' active' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  title={favorites.has(v.id) ? 'Remove from favorites' : 'Add to favorites'}
+                  onClick={(e) => toggleFavorite(e, v.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleFavorite(e, v.id);
+                    }
+                  }}
+                >
+                  <Icon name={favorites.has(v.id) ? 'star' : 'star_border'} />
+                </span>
                 {v.previewUrl && (
                   <span
                     className={`icon-btn${previewId === v.id ? ' active' : ''}`}
