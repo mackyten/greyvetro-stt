@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getVoices } from '../../core/api';
 import { Icon } from '../../core/Icon';
 import { voiceTagline, type Voice } from '../../core/types';
@@ -18,6 +18,27 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
   const [search, setSearch] = useState('');
   const [gender, setGender] = useState<GenderFilter>('all');
   const [createOpen, setCreateOpen] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Stop whatever preview clip is playing when the picker unmounts (voice
+  // selected, or the modal is closed) — pause() doesn't fire 'ended', so this
+  // never fights with the previewId cleared there.
+  useEffect(() => () => previewAudioRef.current?.pause(), []);
+
+  const togglePreview = (v: Voice) => {
+    if (!v.previewUrl) return;
+    previewAudioRef.current?.pause();
+    if (previewId === v.id) {
+      setPreviewId(null);
+      return;
+    }
+    const audio = new Audio(v.previewUrl);
+    previewAudioRef.current = audio;
+    audio.addEventListener('ended', () => setPreviewId(null));
+    audio.play().catch(() => setPreviewId(null));
+    setPreviewId(v.id);
+  };
 
   const load = () => {
     setVoices(null);
@@ -107,6 +128,27 @@ export function VoicePickerModal({ selectedId, onSelect, onClose }: Props) {
                   <div className="vname">{v.name}</div>
                   <div className="vtag">{voiceTagline(v)}</div>
                 </div>
+                {v.previewUrl && (
+                  <span
+                    className={`icon-btn${previewId === v.id ? ' active' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    title={previewId === v.id ? 'Stop preview' : 'Preview voice'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      togglePreview(v);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        togglePreview(v);
+                      }
+                    }}
+                  >
+                    <Icon name={previewId === v.id ? 'stop' : 'play_arrow'} />
+                  </span>
+                )}
                 {v.isCustom && <span className="badge">My voice</span>}
               </button>
             ))}
