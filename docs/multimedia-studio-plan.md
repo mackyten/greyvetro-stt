@@ -1,6 +1,7 @@
 # Greyvetro Studio — Multimedia Creation Tool Plan
 
-> Status: **in progress** — Phase 1 (STT) built 2026-07-17 · Drafted 2026-07-17
+> Status: **in progress** — Phase 0 (rename) shipped 2026-07-21 · Phase 1 (STT)
+> built 2026-07-17 · Drafted 2026-07-17
 >
 > Converts the current TTS app into an AI-assisted **video assembler**: script
 > generation → voiceover → timestamped transcript → scene images → rendered mp4.
@@ -88,7 +89,7 @@ Everything follows the existing conventions — no structural changes.
 
 | Phase | Deliverable | Size |
 |---|---|---|
-| **0. Rename** | Repo/folder `greyvetro-stt` → `greyvetro-studio`; update both CLAUDE.md files + README. .NET namespaces (`Greyvetro.*`) are already generic — no code churn. Avoid "STT" in the name; the app is TTS-first ("studio" reads better). | XS |
+| **0. Rename** ✅ | Shipped 2026-07-21: GitHub repo `mackyten/greyvetro-stt` → `mackyten/greyvetro-studio` (`gh repo rename`, local `origin` remote auto-updated), local folder `~/development/GREYVETRO/greyvetro-stt` → `greyvetro-studio`, CLAUDE.md + README updated to match. .NET namespaces (`Greyvetro.*`) were already generic — no code churn. | XS |
 | **1. STT** ✅ | `POST /stt` (ElevenLabs Scribe, word timestamps) + "Transcribe" action on a saved take in the web UI. Built 2026-07-17: `TranscribeAudioCommand`/`Handler`, `Transcript` entity, Scribe called via a typed `HttpClient` (the ElevenLabs-DotNet SDK has no STT endpoint); web gallery cards get a "📝 Transcribe" chip → transcript stored on the `GalleryItem` in IndexedDB → `TranscriptModal` (full text / word-timings views, copy). **Requires the ElevenLabs API key to have the `speech_to_text` permission** — enable it on the key in the ElevenLabs dashboard (verified 401 `missing_permissions` otherwise). | S |
 | **2. Script generation** ✅ | Built 2026-07-17 on **Gemini** (see §3 rows 1–2, 5): `POST /script` (topic → TTS-ready script) + `POST /script/scenes` (transcript → scenes JSON via structured output), `GeminiService` in Infrastructure, `GenerateScriptHandler`/`GenerateScenesHandler`. Web UI: composer "✨ Write with AI" chip → `ScriptAssistModal` (topic, style, ~30/60/90/120s) fills the script editor; TranscriptModal "🎬 Scene prompts" view lists scenes with per-scene copy-prompt buttons (paste into Flow). Requires `GEMINI_APIKEY`. | S |
 | **3. Storyboard** ✅ | Built 2026-07-17: `features/storyboard/` + a **Storyboard** nav tab. Pick a project → pick its voiceover clip → "Generate storyboard" (auto-transcribes via `/stt` if needed, then `/script/scenes`). Vertical scene list: image slot per scene (click to upload/replace, file input), copy-prompt button, drag-to-reorder (times re-anchor keeping durations), delete scene (neighbor absorbs the gap), regenerate. **Preview** (`StoryboardPreview.tsx`): plays the voiceover and swaps the scene image at boundaries, with scene dots + caption. IndexedDB **v3** adds the `scenes` store (`sceneRepo.ts`; scene metadata + image blobs, keyed by project); deleting a project also deletes its scenes. | M |
@@ -120,7 +121,7 @@ Phases 1 and 2 are independent; 3 depends on 1 (timestamps), 4 depends on 3.
 
 ## 7. Open questions
 
-- New repo name: `greyvetro-studio` proposed — confirm before Phase 0.
+- ~~New repo name: `greyvetro-studio` proposed — confirm before Phase 0.~~ Confirmed and shipped 2026-07-21.
 - Render output spec: resolution (1080×1920 vertical for shorts vs 1920×1080?),
   caption styling, Ken Burns on/off default.
 - Whether scenes should support short video clips (not just stills) in v1 —

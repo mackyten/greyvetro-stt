@@ -1,12 +1,16 @@
-# Greyvetro TTS
+# Greyvetro Studio
 
-A text-to-speech app built on ElevenLabs. .NET backend + Flutter desktop frontend
-+ React web frontend. Built for personal/company use with brand-aligned styling.
+A text-to-speech app built on ElevenLabs, evolving into an AI multimedia
+creation tool (Greyvetro Studio). .NET backend + Flutter desktop frontend +
+React web frontend. Built for personal/company use with brand-aligned styling.
 
-> **Planned expansion — Greyvetro Studio (multimedia creation tool).** The app is
-> set to evolve into an AI video assembler (Claude script generation → ElevenLabs
-> voiceover → timestamped STT transcript → storyboard scenes → ffmpeg mp4 render),
-> including a repo rename. Full plan, workflow mapping, and build phases:
+> **Repo renamed 2026-07-21**: `greyvetro-stt` → `greyvetro-studio` (Phase 0 of
+> the Studio expansion below), matching the GitHub repo and local folder.
+>
+> **Studio (multimedia creation tool).** The app is evolving into an AI video
+> assembler (script generation → ElevenLabs voiceover → timestamped STT
+> transcript → storyboard scenes → ffmpeg mp4 render) with a full non-linear
+> timeline editor. Full plan, workflow mapping, and build phases:
 > **[docs/multimedia-studio-plan.md](docs/multimedia-studio-plan.md)**.
 
 ---
@@ -14,7 +18,7 @@ A text-to-speech app built on ElevenLabs. .NET backend + Flutter desktop fronten
 ## Architecture
 
 ```
-greyvetro-tts/
+greyvetro-studio/
 ├── backend/                       # .NET 10 — Clean Architecture
 │   ├── Greyvetro.Domain/          # Entities + interfaces (no dependencies)
 │   ├── Greyvetro.Application/      # Feature handlers (CQRS-lite: Command/Query + Handler)
@@ -437,10 +441,13 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
        automation limit noted above before the editor even mounts, not a
        regression from this change; the mechanism mirrors the pre-existing,
        already-verified trim-drag gesture rather than introducing a new pattern.
-   - Phase 0 (repo rename) is deliberately deferred pending name confirmation
-     (`greyvetro-studio` proposed). Later/optional: Gemini image generation
-     (the key already has `gemini-3-pro-image` / nano-banana access), clip
-     transitions, Flutter parity.
+   - ✅ **Phase 0 — repo rename** (shipped 2026-07-21): `greyvetro-stt` →
+     `greyvetro-studio` on GitHub (`gh repo rename`, remote auto-updated) and
+     locally (`~/development/GREYVETRO/greyvetro-studio`); this file, README.md,
+     and the plan doc updated to match. No code churn — `.NET` namespaces
+     (`Greyvetro.*`) were already generic. Later/optional: Gemini image
+     generation (the key already has `gemini-3-pro-image` / nano-banana
+     access), clip transitions, Flutter parity.
 
 ### Candidate additions
 - ✅ **Voice settings** — "Voice settings" card in the composer: **Stability**, **Similarity**, **Style** sliders + a **Speaker boost** toggle (on by default — strongest lever for cloned-voice likeness). All four flow through `TtsRequest` → `VoiceSettings`, are stored per gallery item, and restored on edit/regenerate. (Flutter still hardcodes `eleven_multilingual_v2`; the **web** frontend has a Model dropdown — v2 / Eleven v3 / Turbo / Flash — carried through `/tts` `modelId`, gallery items, and presets.)

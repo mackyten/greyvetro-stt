@@ -1,7 +1,9 @@
-# Greyvetro TTS
+# Greyvetro Studio
 
-A text-to-speech desktop app built on ElevenLabs. **.NET 10 backend + Flutter
-desktop frontend** (macOS + Windows). Built for personal/company use with
+A text-to-speech desktop app built on ElevenLabs, evolving into an AI
+multimedia creation tool (Greyvetro Studio — see [`CLAUDE.md`](./CLAUDE.md)).
+**.NET 10 backend + Flutter desktop frontend** (macOS + Windows), plus a React
+web frontend (`frontend-web/`). Built for personal/company use with
 brand-aligned styling.
 
 The ElevenLabs API key lives **only** on the backend — the Flutter app never
@@ -105,9 +107,10 @@ on it to jump to that point.
 ## Project layout
 
 ```
-greyvetro-tts/
+greyvetro-studio/
 ├── backend/        # .NET 10, Clean Architecture (Domain/Application/Infrastructure/API)
 ├── frontend/       # Flutter desktop (macOS + Windows)
+├── frontend-web/   # React 19 + TypeScript web frontend
 └── CLAUDE.md       # architecture, conventions, roadmap
 ```
 
