@@ -1,8 +1,9 @@
-# Greyvetro TTS — Web Frontend
+# Greyvetro Studio — Web Frontend
 
-React (TypeScript + Vite) web version of the Greyvetro TTS desktop app. Talks to
-the same .NET backend on `http://localhost:5050` — the ElevenLabs API key never
-reaches the browser.
+React (TypeScript + Vite) web version of the Greyvetro Studio app (the primary
+surface for the Studio multimedia features — see the root
+[`CLAUDE.md`](../CLAUDE.md)). Talks to the same .NET backend on
+`http://localhost:5050` — the ElevenLabs API key never reaches the browser.
 
 ## Run
 

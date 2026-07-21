@@ -1,8 +1,9 @@
 # greyvetro_tts (frontend)
 
-Flutter desktop client for Greyvetro TTS. This is only the frontend — the app
-talks to the .NET backend at `http://localhost:5050`, so the backend must be
-running too.
+Flutter desktop client for Greyvetro Studio (Dart package name `greyvetro_tts`
+is unchanged by the repo rename — no code churn). This is only the frontend —
+the app talks to the .NET backend at `http://localhost:5050`, so the backend
+must be running too.
 
 👉 **See the [root README](../README.md) for the full-stack quickstart** (both
 terminals, prerequisites, and the Windows note).
