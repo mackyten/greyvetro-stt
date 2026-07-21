@@ -1323,6 +1323,11 @@ input[type='range'] {
   }
 }
 
+.icon-spin {
+  display: inline-flex;
+  animation: spin 0.8s linear infinite;
+}
+
 /* ── Timeline editor (Phase 2 — interactive) ──────────────────────────── */
 .tl {
   display: flex;

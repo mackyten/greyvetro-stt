@@ -22,8 +22,11 @@ var geminiApiKey = builder.Configuration["GEMINI_APIKEY"];
 // "gemini-flash-latest" is Google's rolling alias for the current flash model —
 // pinned versions (e.g. gemini-2.5-flash) get retired for new API keys.
 var geminiModel = builder.Configuration["GEMINI_MODEL"] ?? "gemini-flash-latest";
+// Nano Banana Pro. Override via GEMINI_IMAGE_MODEL if Google renames/retires this
+// id for new keys (same reasoning as GEMINI_MODEL above).
+var geminiImageModel = builder.Configuration["GEMINI_IMAGE_MODEL"] ?? "gemini-3-pro-image";
 
-builder.Services.AddInfrastructure(apiKey, geminiApiKey, geminiModel);
+builder.Services.AddInfrastructure(apiKey, geminiApiKey, geminiModel, geminiImageModel);
 
 var app = builder.Build();
 
@@ -112,6 +115,25 @@ app.MapPost("/script/scenes", async (GenerateScenesRequest req, GenerateScenesHa
     {
         var scenes = await handler.HandleAsync(new GenerateScenesCommand(req.Transcript, req.Instructions), ct);
         return Results.Ok(new { scenes });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: 503);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: (int?)ex.StatusCode ?? 500);
+    }
+});
+
+app.MapPost("/script/scenes/image", async (GenerateSceneImageRequest req, GenerateSceneImageHandler handler, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Prompt))
+        return Results.BadRequest("An image prompt is required.");
+    try
+    {
+        var image = await handler.HandleAsync(new GenerateSceneImageCommand(req.Prompt), ct);
+        return Results.Bytes(image.Data, image.ContentType);
     }
     catch (InvalidOperationException ex)
     {
@@ -233,4 +255,5 @@ app.Run();
 record GenerateSpeechRequest(string Text, string VoiceId, float Stability = 0.5f, float SimilarityBoost = 0.75f, float Style = 0f, bool UseSpeakerBoost = false, string ModelId = "eleven_multilingual_v2");
 record GenerateScriptRequest(string Topic, string? Instructions = null, int TargetSeconds = 60);
 record GenerateScenesRequest(Transcript Transcript, string? Instructions = null);
+record GenerateSceneImageRequest(string Prompt);
 record RenderSceneDto(double Start, double End, int? ImageIndex);

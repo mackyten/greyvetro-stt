@@ -13,7 +13,7 @@ namespace Greyvetro.Infrastructure.Gemini;
 /// default model is set in Program.cs config). REST reference:
 /// https://ai.google.dev/api/generate-content
 /// </summary>
-public class GeminiService(HttpClient http, string model, ILogger<GeminiService> logger) : IScriptGenerationService
+public class GeminiService(HttpClient http, string model, string imageModel, ILogger<GeminiService> logger) : IScriptGenerationService
 {
     public async Task<string> GenerateScriptAsync(string topic, string? instructions, int targetSeconds, CancellationToken ct = default)
     {
@@ -94,6 +94,44 @@ public class GeminiService(HttpClient http, string model, ILogger<GeminiService>
         }).ToList();
     }
 
+    public async Task<GeneratedImage> GenerateSceneImageAsync(string prompt, CancellationToken ct = default)
+    {
+        if (!http.DefaultRequestHeaders.Contains("x-goog-api-key"))
+            throw new InvalidOperationException(
+                "GEMINI_APIKEY is not configured. Get a free key at https://aistudio.google.com/apikey and set the GEMINI_APIKEY environment variable.");
+
+        // 9:16 matches the app's vertical export frame; the storyboard cover-fits
+        // whatever comes back, so a modest resolution keeps this fast and cheap.
+        var request = new
+        {
+            contents = new[] { new { role = "user", parts = new[] { new { text = prompt } } } },
+            generationConfig = new
+            {
+                responseModalities = new[] { "IMAGE" },
+                imageConfig = new { aspectRatio = "9:16", imageSize = "1K" },
+            },
+        };
+
+        using var response = await http.PostAsJsonAsync($"v1beta/models/{imageModel}:generateContent", request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            logger.LogWarning("Gemini image request failed ({Status}): {Body}", response.StatusCode, body);
+            throw new HttpRequestException($"Gemini image request failed: {ExtractErrorMessage(body)}", null, response.StatusCode);
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<GenerateContentResponse>(ct);
+        var inline = result?.Candidates?.FirstOrDefault()?.Content?.Parts?
+            .Select(p => p.InlineData)
+            .FirstOrDefault(d => d is not null);
+        if (inline is null || string.IsNullOrEmpty(inline.Data))
+            throw new HttpRequestException(
+                $"Gemini returned no image (finishReason: {result?.Candidates?.FirstOrDefault()?.FinishReason ?? "unknown"}).");
+
+        return new GeneratedImage(Convert.FromBase64String(inline.Data), inline.MimeType ?? "image/png");
+    }
+
     private async Task<string> GenerateAsync(string system, string user, object? responseSchema, CancellationToken ct)
     {
         if (!http.DefaultRequestHeaders.Contains("x-goog-api-key"))
@@ -119,7 +157,7 @@ public class GeminiService(HttpClient http, string model, ILogger<GeminiService>
         {
             var body = await response.Content.ReadAsStringAsync(ct);
             logger.LogWarning("Gemini request failed ({Status}): {Body}", response.StatusCode, body);
-            throw new HttpRequestException($"Gemini request failed: {body}", null, response.StatusCode);
+            throw new HttpRequestException($"Gemini request failed: {ExtractErrorMessage(body)}", null, response.StatusCode);
         }
 
         var result = await response.Content.ReadFromJsonAsync<GenerateContentResponse>(ct);
@@ -130,6 +168,26 @@ public class GeminiService(HttpClient http, string model, ILogger<GeminiService>
             throw new HttpRequestException(
                 $"Gemini returned no text (finishReason: {result?.Candidates?.FirstOrDefault()?.FinishReason ?? "unknown"}).");
         return text;
+    }
+
+    // Gemini error bodies are a deeply nested JSON blob (quota violation lists, retry
+    // info, help links); `error.message` alone is the one human-readable sentence —
+    // surfacing the raw body instead would dump ~2KB of JSON into an API response/toast.
+    private static string ExtractErrorMessage(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var error) &&
+                error.TryGetProperty("message", out var message) &&
+                message.GetString() is { Length: > 0 } text)
+                return text;
+        }
+        catch (JsonException)
+        {
+            // Not JSON (or an unexpected shape) — fall through to the raw body.
+        }
+        return body;
     }
 
     private sealed record SceneDto(
@@ -149,5 +207,10 @@ public class GeminiService(HttpClient http, string model, ILogger<GeminiService>
         [property: JsonPropertyName("parts")] List<Part>? Parts);
 
     private sealed record Part(
-        [property: JsonPropertyName("text")] string? Text);
+        [property: JsonPropertyName("text")] string? Text,
+        [property: JsonPropertyName("inlineData")] InlineData? InlineData);
+
+    private sealed record InlineData(
+        [property: JsonPropertyName("mimeType")] string? MimeType,
+        [property: JsonPropertyName("data")] string? Data);
 }

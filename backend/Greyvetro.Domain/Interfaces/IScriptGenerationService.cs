@@ -9,4 +9,7 @@ public interface IScriptGenerationService
 
     /// <summary>Proposes storyboard scenes (time ranges + image prompts) from a word-timestamped transcript.</summary>
     Task<IReadOnlyList<Scene>> GenerateScenesAsync(Transcript transcript, string? instructions, CancellationToken ct = default);
+
+    /// <summary>Generates a scene image from its visual prompt (Gemini image model, e.g. Nano Banana Pro).</summary>
+    Task<GeneratedImage> GenerateSceneImageAsync(string prompt, CancellationToken ct = default);
 }

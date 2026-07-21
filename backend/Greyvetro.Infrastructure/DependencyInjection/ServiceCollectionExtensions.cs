@@ -17,7 +17,7 @@ namespace Greyvetro.Infrastructure.DependencyInjection;
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddInfrastructure(
-        this IServiceCollection services, string apiKey, string? geminiApiKey, string geminiModel)
+        this IServiceCollection services, string apiKey, string? geminiApiKey, string geminiModel, string geminiImageModel)
     {
         services.AddSingleton(new ElevenLabsClient(new ElevenLabsAuthentication(apiKey)));
         // Typed client for ElevenLabs REST calls the SDK doesn't cover (Scribe STT).
@@ -45,9 +45,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IScriptGenerationService>(sp => new GeminiService(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("gemini"),
             geminiModel,
+            geminiImageModel,
             sp.GetRequiredService<ILogger<GeminiService>>()));
         services.AddScoped<GenerateScriptHandler>();
         services.AddScoped<GenerateScenesHandler>();
+        services.AddScoped<GenerateSceneImageHandler>();
 
         // ffmpeg render (Greyvetro Studio Phase 4 — legacy scene path).
         services.AddScoped<IVideoRenderService, FfmpegVideoRenderer>();

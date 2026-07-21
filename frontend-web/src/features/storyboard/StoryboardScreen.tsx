@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { generateScenes, renderVideo, transcribeAudio } from '../../core/api';
+import { generateScenes, generateSceneImage, renderVideo, transcribeAudio } from '../../core/api';
 import { Icon } from '../../core/Icon';
 import { useToast } from '../../core/toast';
 import { slugify, type GalleryItem, type Project, type StoredScene } from '../../core/types';
@@ -34,6 +34,8 @@ export function StoryboardScreen() {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
+  const [batchGenerating, setBatchGenerating] = useState(false);
   const dragIndex = useRef<number | null>(null);
   const uploadFor = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -140,6 +142,48 @@ export function StoryboardScreen() {
       return rest;
     });
     setScenes((list) => list?.map((s) => (s.id === sceneId ? { ...s, hasImage: false } : s)) ?? null);
+  };
+
+  const generateImage = async (scene: StoredScene): Promise<boolean> => {
+    if (generatingIds.has(scene.id)) return false;
+    setGeneratingIds((s) => new Set(s).add(scene.id));
+    try {
+      const blob = await generateSceneImage(scene.imagePrompt);
+      await setSceneImage(scene.id, blob);
+      setImageUrls((map) => {
+        if (map[scene.id]) URL.revokeObjectURL(map[scene.id]);
+        return { ...map, [scene.id]: URL.createObjectURL(blob) };
+      });
+      setScenes((list) => list?.map((s) => (s.id === scene.id ? { ...s, hasImage: true } : s)) ?? null);
+      return true;
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Image generation failed.', 'error');
+      return false;
+    } finally {
+      setGeneratingIds((s) => {
+        const next = new Set(s);
+        next.delete(scene.id);
+        return next;
+      });
+    }
+  };
+
+  // Sequential with a short pause between calls — Gemini's free tier is rate-limited
+  // per minute, and a burst of parallel image requests trips it immediately.
+  const generateAllImages = async () => {
+    if (!scenes || batchGenerating) return;
+    const missing = scenes.filter((s) => !s.hasImage);
+    if (missing.length === 0) return;
+    setBatchGenerating(true);
+    let ok = 0;
+    for (let i = 0; i < missing.length; i++) {
+      if (await generateImage(missing[i])) ok++;
+      if (i < missing.length - 1) await new Promise((r) => setTimeout(r, 1200));
+    }
+    setBatchGenerating(false);
+    if (ok === missing.length) toast(`Generated ${ok} scene image${ok === 1 ? '' : 's'}.`);
+    else if (ok > 0) toast(`Generated ${ok}/${missing.length} scene images — some failed.`, 'info');
+    else toast('Image generation failed for all scenes.', 'error');
   };
 
   // Deleting a scene closes the timeline gap: the previous scene absorbs its slot
@@ -252,6 +296,17 @@ export function StoryboardScreen() {
                 </>
               )}
             </button>
+            {scenes.some((s) => !s.hasImage) && (
+              <button className="chip" disabled={batchGenerating} onClick={generateAllImages}>
+                {batchGenerating ? (
+                  'Generating…'
+                ) : (
+                  <>
+                    <Icon name="auto_awesome" /> Generate images
+                  </>
+                )}
+              </button>
+            )}
             <button className="chip" onClick={() => setPreviewOpen(true)}>
               <Icon name="play_arrow" /> Preview
             </button>
@@ -345,6 +400,14 @@ export function StoryboardScreen() {
                 <p className="scene-prompt">{scene.imagePrompt}</p>
               </div>
               <div className="sb-actions">
+                <button
+                  className="icon-btn"
+                  title={scene.hasImage ? 'Regenerate image with AI' : 'Generate image with AI'}
+                  disabled={generatingIds.has(scene.id)}
+                  onClick={() => generateImage(scene)}
+                >
+                  <Icon name="auto_awesome" className={generatingIds.has(scene.id) ? 'icon-spin' : undefined} />
+                </button>
                 <button className="icon-btn" title="Copy image prompt" onClick={() => copyPrompt(scene, i)}>
                   <Icon name="content_copy" />
                 </button>

@@ -13,7 +13,16 @@ const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:5050';
 async function checkStatus(res: Response): Promise<Response> {
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+    // ASP.NET ProblemDetails wraps the real message in a `detail` field alongside
+    // type/title/status boilerplate — surface just that instead of the raw envelope.
+    let message = body;
+    try {
+      const problem = JSON.parse(body);
+      if (typeof problem?.detail === 'string' && problem.detail) message = problem.detail;
+    } catch {
+      // Not JSON — use the raw text as-is.
+    }
+    throw new Error(`API error ${res.status}: ${message}`);
   }
   return res;
 }
@@ -85,6 +94,18 @@ export async function generateScenes(
     }),
   );
   return (await res.json()).scenes;
+}
+
+/** AI-generate a scene image from its visual prompt (Gemini Nano Banana Pro). */
+export async function generateSceneImage(prompt: string): Promise<Blob> {
+  const res = await checkStatus(
+    await fetch(`${BASE}/script/scenes/image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    }),
+  );
+  return res.blob();
 }
 
 export interface RenderScenePayload {
