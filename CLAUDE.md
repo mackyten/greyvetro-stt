@@ -444,8 +444,21 @@ Aim for rounded corners, gentle shadows, generous spacing, and a clean sans-seri
    - ✅ **Phase 0 — repo rename** (shipped 2026-07-21): `greyvetro-stt` →
      `greyvetro-studio` on GitHub (`gh repo rename`, remote auto-updated) and
      locally (`~/development/GREYVETRO/greyvetro-studio`); this file, README.md,
-     and the plan doc updated to match. No code churn — `.NET` namespaces
-     (`Greyvetro.*`) were already generic. Later/optional: Gemini image
+     `frontend/README.md`, and `frontend-web/README.md` updated to match. No
+     code churn to the Flutter package itself — `greyvetro_tts` (pubspec name,
+     Xcode/CMake product name) stays as-is, same call as the already-generic
+     `.NET` namespaces. The web app's IndexedDB **was** renamed (`greyvetro-tts`
+     → `greyvetro-studio` in `frontend-web/src/core/db.ts`), since unlike the
+     Flutter package name it's invisible plumbing with no external identity to
+     preserve — `migrateFromOldDb()` runs once (gated by a localStorage flag)
+     to copy any existing gallery/project/scene/timeline/timelineAsset rows
+     from the old browser database into the new one first, so it doesn't
+     orphan a browser that already had data. The sibling `greyvetro-auth-hub`
+     repo's Keycloak realm config also had an undocumented `greyvetro-tts`
+     OIDC client (uncommitted at the time — added to git history for the
+     first time under the new name rather than literally renamed); it's now
+     `greyvetro-studio` with matching `studio-user`/`studio-admin` roles and a
+     `studio-tester` test user. Later/optional: Gemini image
      generation (the key already has `gemini-3-pro-image` / nano-banana
      access), clip transitions, Flutter parity.
 
